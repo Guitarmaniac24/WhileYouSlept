@@ -443,10 +443,10 @@ function isMoneyTweet(text, hasMedia) {
   // Goals, intentions, hypotheticals
   const isNoise = /(?:my goal|hoping to|want to (?:hit|make|reach)|aiming for|planning to|going to (?:make|hit|reach)|trying to (?:reach|hit|get)|dream of|would love to|working towards|plan is to|aspir|by (?:end of|year end|next year|EOY)|get (?:my |this |the |it )?(?:.*?)to \$)/i.test(text);
   if (isNoise) return false;
-  // Advice, threads, lessons, reflections
-  const isAdvice = /(?:^how to|^why you|^stop |^don't|should you|^the secret|^my advice|^tip:|^thread|^lesson|\d+\s+(?:biggest|best|top|key|important)\s+(?:lessons?|tips?|things?|ways?|steps?|rules?)|\d+\s+ways\s+I|should have (?:done|started|built)|I learned to)/i.test(text);
+  // Advice, threads, lessons, reflections, motivational musings
+  const isAdvice = /(?:^how to|^why you|^stop |^don't|should you|^the secret|^my advice|^tip:|^thread|^lesson|\d+\s+(?:biggest|best|top|key|important)\s+(?:lessons?|tips?|things?|ways?|steps?|rules?)|\d+\s+ways\s+I|should have (?:done|started|built)|I learned to|sure-shot way|sure.?fire way|best way to find|find your next|thought .* problems would go away)/i.test(text);
   if (isAdvice) return false;
-  const isPromo = /(?:^check out|^join |^sign up|^use code|^discount|^giveaway)/i.test(text);
+  const isPromo = /(?:^check out|^join |^sign up|^use code|^discount|^giveaway|FOR SALE|APP FOR SALE|selling (?:my |the |this ))/i.test(text);
   if (isPromo) return false;
   // Spending / paying money, not making it
   const isSpending = /(?:i pay|pay (?:for|to )|paying (?:for|~?\$)|spend(?:ing)?|cost (?:me|us)|bought|purchased|invested in|raised \$|fundrais|hiring|salary|struggling|might not spend)/i.test(text);
@@ -457,6 +457,12 @@ function isMoneyTweet(text, hasMedia) {
   // Generic observations about others' numbers, not the poster's own
   const isCommentary = /(?:might not|wouldn't|won't|doesn't seem|not (?:possible|appealing)|end up doing)/i.test(text);
   if (isCommentary) return false;
+  // RT about someone else's revenue — not the poster's own achievement
+  const isRT = /^RT @/i.test(text);
+  if (isRT) return false;
+  // VC/finance commentary about other companies (not the poster's own product)
+  const isFinanceCommentary = /(?:series [A-F]|tender offer|valuation (?:increase|decrease|drop)|IPO|cap table|fundrais|due diligence|term sheet|pre.?money|post.?money|runway|burn rate)/i.test(text);
+  if (isFinanceCommentary) return false;
 
   // ── Category 1: MRR/ARR update (their own, with $ amount) ──
   // e.g. "$22k MRR", "hit $100k ARR", "our MRR is $50k", "$8m ARR"
@@ -724,8 +730,42 @@ async function backgroundScan() {
     const map = new Map();
     for (const c of existing) map.set(c.id, c);
     for (const c of newCards) map.set(c.id, c);
-    const merged = Array.from(map.values());
+    let merged = Array.from(map.values());
     merged.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    // Deduplicate: if same handle has near-identical cards, keep only newest
+    const byHandle = new Map();
+    for (const c of merged) {
+      if (!byHandle.has(c.handle)) byHandle.set(c.handle, []);
+      byHandle.get(c.handle).push(c);
+    }
+    const deduped = [];
+    for (const [handle, cards] of byHandle) {
+      // Sort by date descending so newest cards are "kept" first
+      cards.sort((a, b) => new Date(b.date) - new Date(a.date));
+      const kept = [];
+      for (const card of cards) {
+        // Extract dollar figures to compare similarity
+        const nums = (card.summary.match(/\$[\d,.]+[KkMm]?/g) || []).sort().join('|');
+        // Extract "DAY X" or "Day X" pattern for series detection
+        const dayMatch = card.summary.match(/\bDAY\s+(\d+)\b/i);
+        const dayTag = dayMatch ? 'DAY_SERIES' : null;
+        const isDupe = kept.some(k => {
+          const kNums = (k.summary.match(/\$[\d,.]+[KkMm]?/g) || []).sort().join('|');
+          // Same dollar figures = duplicate
+          if (nums && nums === kNums) return true;
+          // Same "DAY X" series from same handle = keep only newest
+          if (dayTag) {
+            const kDay = k.summary.match(/\bDAY\s+(\d+)\b/i);
+            if (kDay) return true;
+          }
+          return false;
+        });
+        if (!isDupe) kept.push(card);
+      }
+      deduped.push(...kept);
+    }
+    merged = deduped.sort((a, b) => new Date(b.date) - new Date(a.date));
 
     // Persist everywhere
     await storeFeedCards(merged);
