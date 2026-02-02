@@ -99,9 +99,12 @@ async function ensureSchema() {
       views INT DEFAULT 0,
       bookmarks INT DEFAULT 0,
       date TEXT,
+      media TEXT,
       created_at TIMESTAMPTZ DEFAULT NOW()
     )
   `);
+  // Add media column to existing tables
+  await pool.query(`ALTER TABLE feed_cards ADD COLUMN IF NOT EXISTS media TEXT`).catch(() => {});
   await pool.query(`
     CREATE TABLE IF NOT EXISTS scan_state (
       screenname TEXT PRIMARY KEY,
@@ -176,9 +179,13 @@ async function getFeedCardsFromDb() {
   if (!pool) return null;
   try {
     const r = await pool.query(
-      'SELECT id,handle,name,avatar,summary,score,likes,views,bookmarks,date FROM feed_cards ORDER BY created_at DESC'
+      'SELECT id,handle,name,avatar,summary,score,likes,views,bookmarks,date,media FROM feed_cards ORDER BY created_at DESC'
     );
-    return r.rows.length ? r.rows : null;
+    if (!r.rows.length) return null;
+    return r.rows.map(row => ({
+      ...row,
+      media: row.media ? JSON.parse(row.media) : null,
+    }));
   } catch (e) { return null; }
 }
 
@@ -186,33 +193,36 @@ async function storeFeedCards(cards) {
   if (!pool || !cards.length) return;
   try {
     const ids = [], hs = [], ns = [], avs = [], sums = [];
-    const scs = [], lks = [], vws = [], bks = [], dts = [];
+    const scs = [], lks = [], vws = [], bks = [], dts = [], mds = [];
     for (const c of cards) {
       ids.push(c.id); hs.push(c.handle); ns.push(c.name);
       avs.push(c.avatar); sums.push(c.summary); scs.push(c.score);
       lks.push(c.likes); vws.push(c.views); bks.push(c.bookmarks);
-      dts.push(c.date);
+      dts.push(c.date); mds.push(c.media ? JSON.stringify(c.media) : null);
     }
     await pool.query(`
-      INSERT INTO feed_cards (id,handle,name,avatar,summary,score,likes,views,bookmarks,date)
+      INSERT INTO feed_cards (id,handle,name,avatar,summary,score,likes,views,bookmarks,date,media)
       SELECT * FROM unnest($1::text[],$2::text[],$3::text[],$4::text[],$5::text[],
-        $6::real[],$7::int[],$8::int[],$9::int[],$10::text[])
+        $6::real[],$7::int[],$8::int[],$9::int[],$10::text[],$11::text[])
       ON CONFLICT (id) DO UPDATE SET
         summary=EXCLUDED.summary, score=EXCLUDED.score,
         likes=EXCLUDED.likes, views=EXCLUDED.views,
-        bookmarks=EXCLUDED.bookmarks, date=EXCLUDED.date
-    `, [ids, hs, ns, avs, sums, scs, lks, vws, bks, dts]);
+        bookmarks=EXCLUDED.bookmarks, date=EXCLUDED.date,
+        media=EXCLUDED.media
+    `, [ids, hs, ns, avs, sums, scs, lks, vws, bks, dts, mds]);
   } catch (err) {
     for (const c of cards) {
       try {
         await pool.query(`
-          INSERT INTO feed_cards (id,handle,name,avatar,summary,score,likes,views,bookmarks,date)
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+          INSERT INTO feed_cards (id,handle,name,avatar,summary,score,likes,views,bookmarks,date,media)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
           ON CONFLICT (id) DO UPDATE SET
             summary=EXCLUDED.summary, score=EXCLUDED.score,
             likes=EXCLUDED.likes, views=EXCLUDED.views,
-            bookmarks=EXCLUDED.bookmarks, date=EXCLUDED.date
-        `, [c.id, c.handle, c.name, c.avatar, c.summary, c.score, c.likes, c.views, c.bookmarks, c.date]);
+            bookmarks=EXCLUDED.bookmarks, date=EXCLUDED.date,
+            media=EXCLUDED.media
+        `, [c.id, c.handle, c.name, c.avatar, c.summary, c.score, c.likes, c.views, c.bookmarks, c.date,
+            c.media ? JSON.stringify(c.media) : null]);
       } catch (e) { /* skip */ }
     }
   }
@@ -278,6 +288,7 @@ async function warmScanTimesFromDb() {
 
 /* ── Accounts ───────────────────────────────────────────── */
 const ACCOUNTS = [
+  // ── OG indie hackers & SaaS builders ─────────────────
   'levelsio','marc_louvion','tdinh_me','dannypostmaa','mckaywrigley',
   'bentossell','shpigford','thesamparr','dvassallo','nathanbarry',
   'gregisenberg','ShaanVP','arvidkahl','thepatwalls','csallen',
@@ -297,6 +308,40 @@ const ACCOUNTS = [
   'pie6k','daniel_nguyenx','PaulYacoubian','_rchase_','SlamingDev',
   'mikestrives','MatthewBerman','patio11','dharmesh','lennysan',
   'swyx','karpathy',
+  // ── High-revenue builders ($1M+ ARR / exits) ────────
+  'RetentionAdam',   // Retention.com $22M ARR, RB2B $5M ARR
+  'GuillaumeMbh',    // Lemlist/Lempire $28M ARR bootstrapped
+  'adamwathan',      // Tailwind CSS, Tailwind UI $2M+ launch
+  'jayhoovy',        // Stan Store $33M ARR
+  'brettfromdj',     // DesignJoy $1M+ ARR solo designer
+  'thejustinwelsh',  // $10M solopreneur, 89% margins
+  'wagslane',        // Boot.dev $10M ARR bootstrapped
+  'Patticus',        // ProfitWell, sold for $200M+
+  'asmartbear',      // WP Engine founder
+  'getajobmike',     // Sidekiq $7M/yr solo SaaS
+  'steveschoger',    // Refactoring UI $2.5M+ revenue
+  'chris_orlob',     // Grew Gong to $7B, now pclub.io
+  'JamesonCamp',     // Sold company for $30M+
+  // ── Mid-revenue builders ($10K-$100K MRR) ───────────
+  'samuelrdt',       // 3 SaaS products at $35K MRR
+  'SamyDindane',     // Hypefury $70K+ MRR
+  'euboid',          // Senja co-founder $83K+ MRR
+  'jackfriks',       // PostBridge $18K/month
+  'CameronTrew',     // Kleo $62K MRR, Mentions $20K MRR
+  'KateBour',        // $400K/yr solo business
+  'connorshowler',   // $3M+ profit, 8+ yrs digital
+  'vishalkumar',     // OneUp $1M+/year
+  'DavisBaer',       // OneUp co-founder
+  // ── Build in public / micro-SaaS ────────────────────
+  'noahwbragg',      // Sold Potion for $300K
+  'thelifeofrishi',  // Pika screenshot tool
+  'gouthamjay8',     // Famewall, sold Mailboat
+  'maoxai_',         // AI app to $4K MRR in 100 days
+  'courtkland',      // Indie Hackers founder (sold to Stripe)
+  'rameerez',        // Indie hacker builder
+  'DanKoe',          // Solopreneur, courses & community
+  'patflynn',        // Smart Passive Income, transparent reports
+  'maxprilutskiy',   // Notionlytics
 ];
 
 /* ── Response helpers ───────────────────────────────────── */
@@ -385,25 +430,68 @@ async function fetchTimeline(screenname) {
   return data;
 }
 
-/* ── Revenue filter ─────────────────────────────────────── */
-function isMoneyTweet(text) {
-  const hasDollar     = /\$[\d,]+/.test(text);
-  const hasRevKW      = /(?:MRR|ARR|revenue|income|profit|margin|sales)/i.test(text);
-  const hasMoneyKW    = /(?:made|earned|grossed|netted|bringing in|generating)/i.test(text);
-  const hasSold       = /(?:SOLD FOR|ACQUIRED FOR|sold.*\$|acquisition.*\$)/i.test(text);
-  const hasCustProof  = /(?:paying customers|paid users|subscribers|new customers|purchases|conversions)/i.test(text) && /\d/.test(text);
-  const hasRevNum     = /\d+[KkMm]?\s*(?:MRR|ARR|\/mo|\/month|\/year|revenue)/i.test(text);
-  const isAdvice      = /(?:^how to|^why you|^stop |^don't|should you|^the secret|^my advice|^tip:|^thread)/i.test(text);
-  const isPromo       = /(?:^check out|^join |^sign up|^use code|^discount|^giveaway)/i.test(text);
-  if (isAdvice || isPromo) return false;
-  return hasDollar || hasSold || hasCustProof || hasRevNum ||
-    (hasRevKW && /\d/.test(text)) || (hasMoneyKW && /\$/.test(text));
+/* ── Strict filter: ONLY 3 categories ──────────────────── */
+/*  1. Monthly MRR / revenue update (with screenshot)
+ *  2. Sold / acquired company + price
+ *  3. SaaS monthly earnings report
+ *  Everything else is rejected.
+ */
+function isMoneyTweet(text, hasMedia) {
+  if (!text) return false;
+
+  // ── Hard rejections ──────────────────────────────────
+  // Goals, intentions, hypotheticals
+  const isNoise = /(?:my goal|hoping to|want to (?:hit|make|reach)|aiming for|planning to|going to (?:make|hit|reach)|trying to (?:reach|hit|get)|dream of|would love to|working towards|plan is to|aspir|by (?:end of|year end|next year|EOY)|get (?:my |this |the |it )?(?:.*?)to \$)/i.test(text);
+  if (isNoise) return false;
+  // Advice, threads, lessons, reflections
+  const isAdvice = /(?:^how to|^why you|^stop |^don't|should you|^the secret|^my advice|^tip:|^thread|^lesson|\d+\s+(?:biggest|best|top|key|important)\s+(?:lessons?|tips?|things?|ways?|steps?|rules?)|\d+\s+ways\s+I|should have (?:done|started|built)|I learned to)/i.test(text);
+  if (isAdvice) return false;
+  const isPromo = /(?:^check out|^join |^sign up|^use code|^discount|^giveaway)/i.test(text);
+  if (isPromo) return false;
+  // Spending / paying money, not making it
+  const isSpending = /(?:i pay|pay (?:for|to )|paying (?:for|~?\$)|spend(?:ing)?|cost (?:me|us)|bought|purchased|invested in|raised \$|fundrais|hiring|salary|struggling|might not spend)/i.test(text);
+  if (isSpending) return false;
+  // Hypotheticals, third party, quoting prices, questions about buying
+  const isThirdParty = /(?:can buy|could buy|you can|you'll|imagine|if you|if i (?:wanted|could|just)|i could probably|for only|priced at|worth \$|valued at|starting at|costs? \$|cheap|expensive|why would|how would|what if|anyone (?:here )?(?:buying|selling|looking))/i.test(text);
+  if (isThirdParty) return false;
+  // Generic observations about others' numbers, not the poster's own
+  const isCommentary = /(?:might not|wouldn't|won't|doesn't seem|not (?:possible|appealing)|end up doing)/i.test(text);
+  if (isCommentary) return false;
+
+  // ── Category 1: MRR/ARR update (their own, with $ amount) ──
+  // e.g. "$22k MRR", "hit $100k ARR", "our MRR is $50k", "$8m ARR"
+  const isMrrUpdate = /(?:\$[\d,.]+[KkMm]?\s*(?:MRR|ARR)|\b(?:MRR|ARR)\s*(?::|is|hit|at|of|reached|crossed|passed)?\s*\$[\d,.]+)/i.test(text);
+
+  // ── Category 2: Sold / acquired company ──
+  // e.g. "sold my company for $2m", "acquired for $500k", "sold two startups for $8m"
+  const isSold = /(?:sold (?:my |the |our |a )?(?:company|startup|saas|app|business|product)|acquired for|acquisition.*\$|exit(?:ed)? (?:for|at) \$|\bsold\b.*(?:startup|company|saas).*\$)/i.test(text);
+
+  // ── Category 3: Monthly SaaS earnings (their own) ──
+  // e.g. "made $150k this month", "$50k/mo", "did $30k in January", "revenue hit $100k"
+  const isMonthlySaas = (
+    // "$X/mo" or "$X/month" or "$X this month" or "$X in [month name]" or "$X last month"
+    /\$[\d,.]+[KkMm]?\s*(?:\/mo(?:nth)?|this month|last month|per month)/i.test(text) ||
+    // "made/earned/did/generated $X" — first person earnings
+    /(?:^|\b)(?:i |we |I've |we've )?(?:made|earned|did|generated|grossed|netted|cleared|brought in|pulling in)\s+(?:~?\$[\d,.]+[KkMm]?|\$[\d,.]+[KkMm]?)/i.test(text) ||
+    // "revenue [hit/reached/crossed/at] $X"
+    /\brevenue\b.*\$[\d,.]+/i.test(text) ||
+    // "in the last 30 days i made"
+    /(?:last|this|past)\s+(?:\d+\s+)?(?:days?|month|months|week)\s.*(?:made|earned|did|generated|revenue)\s.*\$/i.test(text) ||
+    // "[month name] revenue/income: $X" or "[month name] was $X"
+    /(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+(?:\d{4}\s+)?(?:revenue|income|was|did|earned|made).*\$/i.test(text)
+  );
+
+  return isMrrUpdate || isSold || isMonthlySaas;
 }
 
 /* ── FOMO scoring ───────────────────────────────────────── */
 function fomoScore(tweet) {
   const text = tweet.text || '';
-  if (!isMoneyTweet(text)) return 0;
+  const hasMedia = tweet.media && (
+    (tweet.media.photo && tweet.media.photo.length > 0) ||
+    (tweet.media.video && tweet.media.video.length > 0)
+  );
+  if (!isMoneyTweet(text, hasMedia)) return 0;
 
   const favs      = tweet.favorites || 0;
   const views     = parseInt(tweet.views) || 0;
@@ -433,71 +521,71 @@ function fomoScore(tweet) {
 
   if (/\b(?:SOLD|ACQUIRED|acquisition|exit)\b/i.test(text)) score += 15;
   if (/(?:MRR|ARR)/i.test(text)) score += 5;
+  // Bonus for having a screenshot (proof)
+  if (hasMedia) score += 5;
 
   return Math.round(score * 10) / 10;
 }
 
-/* ── OpenAI summarization ───────────────────────────────── */
-async function summarizeTweets(tweetsWithAuthors) {
-  if (!OPENAI_KEY || !tweetsWithAuthors.length) return tweetsWithAuthors.map(() => null);
+/* ── Clean tweet text for display ──────────────────────── */
+function cleanTweetText(text) {
+  if (!text) return '';
+  return text
+    .replace(/https?:\/\/t\.co\/\S+/g, '')   // strip t.co links
+    .replace(/&amp;/g, '&')                   // decode HTML entities from Twitter
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\n{3,}/g, '\n\n')              // collapse excessive newlines
+    .trim();
+}
 
-  const prompt = tweetsWithAuthors.map((t, i) =>
-    `[${i}] @${t.author.screen_name} (${t.author.name}): "${t.text}"`
-  ).join('\n\n');
+/* ── Extract money snippet from tweet ──────────────────── */
+function extractMoneySnippet(text) {
+  if (!text) return '';
+  // Short tweets — use as-is
+  if (text.length <= 200) return text;
 
-  try {
-    const body = JSON.stringify({
-      model: 'gpt-4o-mini',
-      messages: [
-        {
-          role: 'system',
-          content: `You extract the most FOMO-inducing snippet from tweets by AI builders making real money.
-
-ONLY process tweets that show CONCRETE PROOF of one of these:
-1. Revenue numbers (MRR, ARR, monthly income, profit)
-2. A sale or acquisition with a price
-3. Paying customers / paid user counts
-4. Earnings reports or income breakdowns
-
-STRICT RULES:
-- Return "SKIP" for anything that is NOT concrete revenue/money proof
-- SKIP: opinions, advice, motivational quotes, product launches without revenue, growth without revenue, general statements
-- SKIP: investments, fundraising, or spending money (we only care about MAKING money)
-- Extract the EXACT words from the tweet that will cause maximum FOMO — the line that makes readers feel they're falling behind
-- Return VERBATIM text from the tweet — do NOT rewrite, paraphrase, or add words
-- If the tweet is short and already a gut-punch, return the whole thing
-- If long, extract only the most devastating sentence or fragment (the one with the numbers)
-- Strip @mentions and URLs but keep everything else exactly as written
-- Max 200 chars per extract
-- Return a JSON array of strings, one per tweet, same order`
-        },
-        {
-          role: 'user',
-          content: `Extract the most FOMO-inducing verbatim snippet from each tweet. SKIP anything without real revenue/money proof:\n\n${prompt}\n\nReturn ONLY a JSON array of strings — exact quotes from the tweets.`
-        }
-      ],
-      temperature: 0.4,
-      max_tokens: 2000,
-    });
-
-    const resp = await httpsReq({
-      hostname: 'api.openai.com',
-      path: '/v1/chat/completions',
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${OPENAI_KEY}`,
-        'Content-Type': 'application/json',
-      },
-    }, body);
-
-    const content = resp.choices?.[0]?.message?.content || '[]';
-    const match = content.match(/\[[\s\S]*\]/);
-    if (match) return JSON.parse(match[0]);
-  } catch (err) {
-    console.error('OpenAI error:', err.message);
+  // Split into lines, then further split long lines into sentences
+  const raw = text.split(/\n+/).map(s => s.trim()).filter(Boolean);
+  const parts = [];
+  for (const line of raw) {
+    if (line.length <= 200) {
+      parts.push(line);
+    } else {
+      // Split long paragraphs into sentences
+      const sentences = line.split(/(?<=[.!?])\s+/);
+      for (const s of sentences) parts.push(s.trim());
+    }
   }
 
-  return tweetsWithAuthors.map(() => null);
+  // Score each part for money content
+  const scored = parts.map(s => {
+    let score = 0;
+    if (/\$[\d,]+[KkMm]?/.test(s)) score += 10;
+    if (/\d+[KkMm]\s*(?:MRR|ARR|\/mo|\/month|revenue)/i.test(s)) score += 8;
+    if (/(?:MRR|ARR|revenue|income|profit|margin)/i.test(s)) score += 5;
+    if (/(?:made|earned|grossed|netted|bringing in|generating|sold for|acquired for)/i.test(s)) score += 4;
+    if (/(?:paying customers|paid users|subscribers)/i.test(s)) score += 4;
+    if (/\d+[KkMm]/.test(s)) score += 2;
+    return { text: s, score };
+  });
+
+  // Grab lines with money signals
+  const money = scored.filter(s => s.score > 0).sort((a, b) => b.score - a.score);
+  if (!money.length) return text.slice(0, 200).trim();
+
+  // Take top money lines, cap each line at 200 chars, total at 280
+  let snippet = money[0].text.slice(0, 200);
+  for (let i = 1; i < money.length; i++) {
+    const next = money[i].text.slice(0, 200);
+    const combined = snippet + '\n' + next;
+    if (combined.length > 280) break;
+    snippet = combined;
+  }
+
+  return snippet.trim();
 }
 
 /* ── Background scan (runs independently of user requests) ─ */
@@ -582,34 +670,53 @@ async function backgroundScan() {
       return;
     }
 
-    // Summarize only NEW tweets (never re-summarize)
+    // Use actual tweet text (no AI rewriting — every word shown is from the real post)
     newTweets.sort((a, b) => b._score - a._score);
     const top = newTweets.slice(0, 50);
-
-    const summaries = [];
-    for (let i = 0; i < top.length; i += 10) {
-      const batch = top.slice(i, i + 10);
-      console.log(`[scan] Summarizing batch ${Math.floor(i / 10) + 1}...`);
-      summaries.push(...await summarizeTweets(batch));
-    }
 
     // Build new feed cards
     const newCards = [];
     for (let i = 0; i < top.length; i++) {
-      const t = top[i], s = summaries[i];
-      if (!s || s === 'SKIP') continue;
+      const t = top[i];
+      const cleaned = cleanTweetText(t.text || '');
+      const text = extractMoneySnippet(cleaned);
+      if (!text) continue;
       const a = t.author || {};
+
+      // Extract media (photos + video thumbnails)
+      const tweetMedia = [];
+      if (t.media) {
+        if (t.media.photo) {
+          for (const p of t.media.photo) {
+            if (p.media_url_https) tweetMedia.push({ type: 'photo', url: p.media_url_https });
+          }
+        }
+        if (t.media.video) {
+          for (const v of t.media.video) {
+            const mp4s = (v.variants || [])
+              .filter(x => x.content_type === 'video/mp4')
+              .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
+            tweetMedia.push({
+              type: 'video',
+              thumb: v.media_url_https || '',
+              url: mp4s.length ? mp4s[0].url : null,
+            });
+          }
+        }
+      }
+
       newCards.push({
         id: t.tweet_id,
         handle: a.screen_name || '',
         name: a.name || '',
         avatar: (a.avatar || '').replace('_normal', '_bigger'),
-        summary: s,
+        summary: text,
         score: t._score,
         likes: t.favorites || 0,
         views: parseInt(t.views) || 0,
         bookmarks: t.bookmarks || 0,
         date: t.created_at || '',
+        media: tweetMedia.length ? tweetMedia : null,
       });
     }
 
@@ -647,6 +754,24 @@ const server = http.createServer(async (req, res) => {
       cards: memoryFeedCache?.cards?.length || 0,
       scanning: scanInProgress,
     });
+  }
+
+  // Checkout — redirect to Stripe with handle
+  if (url.pathname === '/api/checkout') {
+    const handle = (url.searchParams.get('handle') || '').replace(/^@/, '').trim();
+    if (!handle) {
+      res.writeHead(400, { 'Content-Type': 'text/plain' });
+      return res.end('Missing handle');
+    }
+    const stripeLink = process.env.STRIPE_LINK;
+    if (!stripeLink) {
+      res.writeHead(500, { 'Content-Type': 'text/plain' });
+      return res.end('Checkout not configured');
+    }
+    const sep = stripeLink.includes('?') ? '&' : '?';
+    const dest = `${stripeLink}${sep}client_reference_id=${encodeURIComponent(handle)}`;
+    res.writeHead(302, { Location: dest });
+    return res.end();
   }
 
   // Feed API — READ-ONLY: serves from cache, never triggers a scan

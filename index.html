@@ -27,69 +27,12 @@
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
   body {
-    background: #0a0a0a;
-    color: #e8e8e8;
-    font-family: 'Arial Black', 'Helvetica Neue', Arial, sans-serif;
+    background: #fafafa;
+    color: #000;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     min-height: 100vh;
   }
 
-  /* ── Countdown Banner ───────────────────────────────────── */
-  .countdown-banner {
-    background: #dc2626;
-    padding: 14px 20px;
-    text-align: center;
-    position: sticky;
-    top: 0;
-    z-index: 100;
-    border-bottom: 2px solid #ff4444;
-    box-shadow: 0 2px 20px rgba(220, 38, 38, 0.4);
-  }
-
-  .countdown-label {
-    font-size: 0.6rem;
-    font-weight: 900;
-    letter-spacing: 3px;
-    text-transform: uppercase;
-    color: rgba(255,255,255,0.7);
-    margin-bottom: 4px;
-  }
-
-  .countdown-timer {
-    font-size: clamp(1.1rem, 3vw, 1.6rem);
-    font-weight: 900;
-    color: #fff;
-    letter-spacing: 1px;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .countdown-timer .num {
-    display: inline-block;
-    min-width: 2ch;
-    text-align: center;
-  }
-
-  .countdown-timer .sep {
-    opacity: 0.5;
-    margin: 0 2px;
-  }
-
-  .countdown-timer .unit {
-    font-size: 0.55em;
-    opacity: 0.7;
-    margin-right: 8px;
-    letter-spacing: 1.5px;
-  }
-
-  .countdown-sub {
-    font-size: 0.55rem;
-    font-weight: 700;
-    letter-spacing: 2px;
-    text-transform: uppercase;
-    color: rgba(255,255,255,0.5);
-    margin-top: 4px;
-  }
-
-  /* ── Page ────────────────────────────────────────────────── */
   .page {
     max-width: 1200px;
     margin: 0 auto;
@@ -98,86 +41,191 @@
 
   /* ── Header ────────────────────────────────────────────── */
   .header {
-    padding: 48px 0 36px;
-    border-bottom: 2px solid #222;
-    margin-bottom: 0;
+    padding: 48px 0 32px;
+    border-bottom: 3px solid #000;
+    margin-bottom: 32px;
   }
 
   .header h1 {
+    font-family: 'Arial Black', 'Helvetica Neue', Arial, sans-serif;
     font-size: clamp(2.2rem, 6vw, 4rem);
     font-weight: 900;
     line-height: 1;
     letter-spacing: -2.5px;
     text-transform: uppercase;
-    background: linear-gradient(45deg, #ff6b6b, #dc2743, #ff4444, #ff2222);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
+    color: #000;
   }
 
   .header .sub {
     font-size: clamp(0.85rem, 2vw, 1.05rem);
-    font-weight: 700;
+    font-weight: 600;
     color: #666;
     margin-top: 10px;
     line-height: 1.5;
   }
 
-  .header .meta {
-    font-size: 0.7rem;
-    font-weight: 700;
-    color: #555;
-    margin-top: 14px;
-    letter-spacing: 1.5px;
-    text-transform: uppercase;
-  }
-
-  /* ── Hero headline ─────────────────────────────────────── */
-  .hero {
-    padding: 28px 0;
-    border-bottom: 2px solid #222;
-    margin-bottom: 32px;
+  .header-credit {
     display: flex;
     align-items: center;
-    gap: 16px;
+    gap: 10px;
+    margin-top: 14px;
   }
 
-  .hero-avatar {
-    width: 56px;
-    height: 56px;
+  .header-credit img {
+    width: 28px;
+    height: 28px;
     border-radius: 50%;
-    border: 2px solid #333;
-    flex-shrink: 0;
+    border: 2px solid #000;
   }
 
-  .hero-text {
-    flex: 1;
-    min-width: 0;
-  }
-
-  .hero-tagline {
-    font-size: clamp(1rem, 2.5vw, 1.3rem);
-    font-weight: 900;
-    line-height: 1.3;
-    letter-spacing: -0.5px;
-    color: #e8e8e8;
-  }
-
-  .hero-credit {
-    font-size: 0.75rem;
-    font-weight: 700;
-    color: #555;
-    margin-top: 4px;
-  }
-
-  .hero-credit a {
+  .header-credit span {
+    font-size: 0.7rem;
+    font-weight: 600;
     color: #999;
+  }
+
+  .header-credit a {
+    color: #000;
+    font-weight: 700;
     text-decoration: none;
   }
 
-  .hero-credit a:hover {
+  .header-credit a:hover {
     text-decoration: underline;
-    color: #ccc;
+  }
+
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-top: 18px;
+  }
+
+  /* ── Add Account Button ─────────────────────────────────── */
+  .add-btn {
+    display: inline-block;
+    padding: 10px 22px;
+    background: #000;
+    color: #fff;
+    font-size: 0.75rem;
+    font-weight: 700;
+    font-family: inherit;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    border: 2px solid #000;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+  }
+
+  .add-btn:hover {
+    background: #fff;
+    color: #000;
+  }
+
+  /* ── Modal ──────────────────────────────────────────────── */
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0,0,0,0.6);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .modal-overlay.active {
+    display: flex;
+  }
+
+  .modal {
+    background: #fff;
+    padding: 36px;
+    max-width: 420px;
+    width: 90%;
+    position: relative;
+    border-radius: 12px;
+  }
+
+  .modal-close {
+    position: absolute;
+    top: 12px;
+    right: 16px;
+    font-size: 1.4rem;
+    cursor: pointer;
+    color: #999;
+    background: none;
+    border: none;
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  .modal-close:hover {
+    color: #000;
+  }
+
+  .modal h2 {
+    font-size: 1.2rem;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+    margin-bottom: 6px;
+  }
+
+  .modal p {
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: #666;
+    margin-bottom: 20px;
+    line-height: 1.4;
+  }
+
+  .modal-input {
+    width: 100%;
+    padding: 12px 14px;
+    font-size: 1rem;
+    font-weight: 600;
+    font-family: inherit;
+    border: 2px solid #e0e0e0;
+    border-radius: 8px;
+    outline: none;
+    margin-bottom: 16px;
+    transition: border-color 0.15s;
+  }
+
+  .modal-input::placeholder {
+    color: #bbb;
+  }
+
+  .modal-input:focus {
+    border-color: #000;
+  }
+
+  .modal-submit {
+    width: 100%;
+    padding: 14px;
+    background: #000;
+    color: #fff;
+    font-size: 0.85rem;
+    font-weight: 700;
+    font-family: inherit;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+
+  .modal-submit:hover {
+    background: #222;
+  }
+
+  .modal-submit:disabled {
+    background: #ccc;
+    cursor: not-allowed;
   }
 
   /* ── Loading / Skeleton ────────────────────────────────── */
@@ -188,125 +236,85 @@
 
   .loading p {
     font-size: 0.9rem;
-    font-weight: 900;
+    font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 2px;
-    color: #444;
-  }
-
-  .dot {
-    display: inline-block;
-    animation: blink 1.2s infinite;
-  }
-  .dot:nth-child(2) { animation-delay: 0.2s; }
-  .dot:nth-child(3) { animation-delay: 0.4s; }
-
-  @keyframes blink {
-    0%, 80%, 100% { opacity: 0.2; }
-    40% { opacity: 1; }
+    color: #999;
   }
 
   .skeleton {
     display: none;
-    flex-direction: column;
-    gap: 0;
-    max-width: 800px;
+    column-count: 3;
+    column-gap: 16px;
+    max-width: 1200px;
     margin: 24px auto 0;
   }
 
   .skeleton-card {
-    padding: 24px 0;
-    border-bottom: 1px solid #1a1a1a;
-    display: flex;
-    gap: 14px;
+    break-inside: avoid;
+    margin-bottom: 16px;
+    padding: 20px;
+    background: #fff;
+    border-radius: 12px;
+    border: 1px solid #eee;
   }
 
   .skeleton-avatar {
-    width: 44px;
-    height: 44px;
+    width: 40px;
+    height: 40px;
     border-radius: 50%;
-    background: linear-gradient(90deg, #1a1a1a 25%, #222 50%, #1a1a1a 75%);
+    background: linear-gradient(90deg, #f0f0f0 25%, #f8f8f8 50%, #f0f0f0 75%);
     background-size: 200% 100%;
     animation: shimmer 1.5s infinite;
-    flex-shrink: 0;
+    margin-bottom: 12px;
   }
-
-  .skeleton-body { flex: 1; }
 
   .skeleton-line {
     height: 14px;
-    background: linear-gradient(90deg, #1a1a1a 25%, #222 50%, #1a1a1a 75%);
+    background: linear-gradient(90deg, #f0f0f0 25%, #f8f8f8 50%, #f0f0f0 75%);
     background-size: 200% 100%;
     animation: shimmer 1.5s infinite;
-    border-radius: 4px;
+    border-radius: 6px;
     margin-bottom: 10px;
   }
 
   .skeleton-line.short { width: 40%; }
   .skeleton-line.medium { width: 70%; }
-  .skeleton-line.long { width: 90%; height: 22px; }
+  .skeleton-line.long { width: 90%; height: 20px; }
 
   @keyframes shimmer {
     0% { background-position: 200% 0; }
     100% { background-position: -200% 0; }
   }
 
-  /* ── Content area: feed + sidebar ──────────────────────── */
-  .content {
-    display: grid;
-    grid-template-columns: 1fr 300px;
-    gap: 32px;
-    align-items: start;
-  }
-
+  /* ── Feed: Masonry 3-column ─────────────────────────────── */
   .feed {
-    display: flex;
-    flex-direction: column;
-    gap: 0;
-  }
-
-  /* ── New cards indicator ────────────────────────────────── */
-  .new-badge {
-    display: none;
-    align-items: center;
-    justify-content: center;
-    padding: 10px 0;
-    border-bottom: 1px solid #1a1a1a;
-    cursor: pointer;
-    transition: background 0.15s;
-  }
-
-  .new-badge:hover { background: #111; }
-
-  .new-badge span {
-    font-size: 0.7rem;
-    font-weight: 900;
-    letter-spacing: 1.5px;
-    text-transform: uppercase;
-    color: #dc2743;
+    column-count: 3;
+    column-gap: 16px;
   }
 
   /* ── Card ───────────────────────────────────────────────── */
   .card {
-    padding: 24px 0;
-    border-bottom: 1px solid #1a1a1a;
+    break-inside: avoid;
     display: flex;
     gap: 14px;
+    margin-bottom: 16px;
+    padding: 20px;
+    background: #fff;
+    border-radius: 12px;
+    border: 1px solid #eee;
     opacity: 0;
     transform: translateY(12px);
     animation: cardIn 0.35s ease forwards;
     cursor: pointer;
     text-decoration: none;
     color: inherit;
-    transition: background 0.15s ease;
+    transition: box-shadow 0.2s, transform 0.2s;
   }
 
   .card:hover {
-    background: #111;
-  }
-
-  .card:first-child, .card.no-top-pad {
-    padding-top: 0;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+    transform: translateY(-2px);
   }
 
   @keyframes cardIn {
@@ -314,26 +322,26 @@
   }
 
   .card-fresh {
-    animation: slideDown 0.5s ease forwards;
+    animation: fadeIn 0.5s ease forwards;
   }
 
-  @keyframes slideDown {
-    from { opacity: 0; transform: translateY(-16px); }
-    to { opacity: 1; transform: translateY(0); }
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
   }
 
-  .card-avatar-col {
+  .card-left {
     flex-shrink: 0;
   }
 
   .card-avatar {
-    width: 44px;
-    height: 44px;
+    width: 40px;
+    height: 40px;
     border-radius: 50%;
-    background: #1a1a1a;
+    background: #f0f0f0;
   }
 
-  .card-body {
+  .card-right {
     flex: 1;
     min-width: 0;
   }
@@ -342,145 +350,224 @@
     display: flex;
     align-items: baseline;
     gap: 6px;
-    margin-bottom: 6px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
   }
 
   .card-name {
     font-size: 0.8rem;
-    font-weight: 900;
+    font-weight: 800;
     white-space: nowrap;
-    color: #ccc;
   }
 
   .card-handle {
     font-size: 0.7rem;
-    font-weight: 700;
-    color: #555;
+    font-weight: 500;
+    color: #999;
     white-space: nowrap;
   }
 
   .card-date {
     font-size: 0.65rem;
-    font-weight: 700;
-    color: #444;
+    font-weight: 500;
+    color: #bbb;
     margin-left: auto;
     white-space: nowrap;
   }
 
   .card-summary {
-    font-weight: 900;
-    line-height: 1.2;
-    letter-spacing: -0.3px;
-    margin-bottom: 8px;
+    font-weight: 500;
+    font-size: 0.9rem;
+    line-height: 1.45;
+    letter-spacing: -0.1px;
+    margin-bottom: 10px;
     overflow-wrap: break-word;
-    color: #f0f0f0;
+    color: #222;
+    white-space: pre-line;
   }
 
-  .card-quote-mark {
-    color: #dc2626;
-    font-size: 1.4em;
-    line-height: 0;
-    vertical-align: middle;
-    margin-right: 2px;
-  }
-
-  .card.sm .card-summary { font-size: 1.1rem; }
-  .card.md .card-summary { font-size: 1.4rem; }
-  .card.lg .card-summary { font-size: 1.8rem; letter-spacing: -0.7px; }
-  .card.xl .card-summary { font-size: 2.2rem; letter-spacing: -1px; }
+  .card.md .card-summary { font-size: 0.95rem; }
+  .card.lg .card-summary { font-size: 1rem; }
+  .card.xl .card-summary { font-size: 1.05rem; }
 
   .card-summary .money {
-    color: #4ade80;
-    text-shadow: 0 0 20px rgba(74, 222, 128, 0.15);
+    color: #16a34a;
+    font-weight: 800;
+  }
+
+  .card-media {
+    margin: 10px 0 6px;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .card-media img {
+    width: 100%;
+    display: block;
+    border-radius: 8px;
+  }
+
+  .card-media-video {
+    position: relative;
+    cursor: pointer;
+  }
+
+  .card-media-video img {
+    width: 100%;
+    display: block;
+    border-radius: 8px;
+  }
+
+  .card-media-video::after {
+    content: '▶';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 44px;
+    height: 44px;
+    background: rgba(0,0,0,0.7);
+    color: #fff;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    padding-left: 3px;
+  }
+
+  .card-media-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .card-media-grid img {
+    width: 100%;
+    height: 120px;
+    object-fit: cover;
+    border-radius: 0;
   }
 
   .card-stats {
     display: flex;
-    gap: 14px;
+    gap: 12px;
     font-size: 0.65rem;
-    font-weight: 700;
-    color: #444;
-    letter-spacing: 0.3px;
+    font-weight: 600;
+    color: #bbb;
   }
 
-  /* ── Sidebar ───────────────────────────────────────────── */
-  .sidebar {
-    position: sticky;
-    top: 80px;
-  }
-
-  .ad-slot {
-    border: 2px dashed #222;
-    padding: 24px 16px;
-    text-align: center;
-    min-height: 250px;
+  /* ── CTA Card ───────────────────────────────────────────── */
+  .cta-card {
+    break-inside: avoid;
     display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
+    gap: 14px;
+    margin-bottom: 16px;
+    padding: 20px;
+    background: #fff;
+    border-radius: 12px;
+    border: 2px dashed #ddd;
+    cursor: pointer;
+    opacity: 0;
+    animation: cardIn 0.35s ease forwards;
+    transition: border-color 0.2s, box-shadow 0.2s;
   }
 
-  .ad-slot .ad-label {
-    font-size: 0.6rem;
-    font-weight: 700;
-    color: #333;
-    letter-spacing: 2px;
-    text-transform: uppercase;
+  .cta-card:hover {
+    border-color: #000;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.1);
   }
 
-  .ad-slot .ad-cta {
-    font-size: 0.85rem;
-    font-weight: 900;
-    color: #555;
-    line-height: 1.4;
+  .cta-left {
+    flex-shrink: 0;
   }
 
-  .ad-slot .ad-link {
-    font-size: 0.7rem;
-    font-weight: 700;
-    color: #444;
-    text-decoration: underline;
+  .cta-avatar-placeholder {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: 2px dashed #ddd;
+    background: #fafafa;
+  }
+
+  .cta-right {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .cta-line {
+    height: 10px;
+    border-radius: 6px;
+    background: #f0f0f0;
+    margin-bottom: 6px;
+  }
+
+  .cta-name-row {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 10px;
+  }
+
+  .cta-name-row .cta-line:first-child { width: 60px; }
+  .cta-name-row .cta-line:last-child { width: 80px; }
+
+  .cta-body .cta-line { height: 14px; }
+  .cta-body .cta-line:nth-child(1) { width: 100%; }
+  .cta-body .cta-line:nth-child(2) { width: 75%; }
+
+  .cta-stats-row {
+    display: flex;
+    gap: 10px;
     margin-top: 4px;
+    margin-bottom: 14px;
   }
 
-  .ad-inline {
-    padding: 24px 0;
-    border-bottom: 1px solid #1a1a1a;
+  .cta-stats-row .cta-line { width: 45px; height: 8px; }
+
+  .cta-label {
+    font-size: 0.85rem;
+    font-weight: 800;
+    color: #000;
+    letter-spacing: -0.3px;
+    margin-bottom: 2px;
   }
 
-  .ad-inline .ad-slot {
-    min-height: 100px;
+  .cta-sublabel {
+    font-size: 0.65rem;
+    font-weight: 500;
+    color: #999;
   }
 
   /* ── Footer ────────────────────────────────────────────── */
   .footer {
     margin-top: 48px;
     padding: 36px 0 60px;
-    border-top: 2px solid #222;
+    border-top: 3px solid #000;
     text-align: center;
   }
 
   .footer h2 {
+    font-family: 'Arial Black', 'Helvetica Neue', Arial, sans-serif;
     font-size: clamp(1.4rem, 4vw, 2.2rem);
     font-weight: 900;
     letter-spacing: -1px;
     text-transform: uppercase;
     line-height: 1.1;
-    color: #dc2626;
   }
 
   .footer p {
     font-size: 0.9rem;
-    font-weight: 700;
-    color: #555;
+    font-weight: 600;
+    color: #666;
     margin-top: 10px;
   }
 
   .footer .count {
     font-size: 0.75rem;
-    font-weight: 700;
-    color: #444;
+    font-weight: 600;
+    color: #aaa;
     margin-top: 18px;
     letter-spacing: 1px;
   }
@@ -497,23 +584,23 @@
     width: 32px;
     height: 32px;
     border-radius: 50%;
-    background: #1a1a1a;
+    background: #eee;
   }
 
   .credit-text {
     font-size: 0.8rem;
-    font-weight: 700;
-    color: #555;
+    font-weight: 600;
+    color: #999;
   }
 
   .credit-text a {
-    color: #999;
+    color: #000;
+    font-weight: 700;
     text-decoration: none;
   }
 
   .credit-text a:hover {
     text-decoration: underline;
-    color: #ccc;
   }
 
   /* ── Empty state ────────────────────────────────────────── */
@@ -525,18 +612,16 @@
   .empty-state p {
     font-size: 0.85rem;
     font-weight: 700;
-    color: #555;
+    color: #aaa;
     letter-spacing: 1px;
     text-transform: uppercase;
   }
 
-  .empty-state .sub {
+  .empty-state .sub-text {
     font-size: 0.75rem;
-    font-weight: 700;
-    color: #444;
+    font-weight: 500;
+    color: #ccc;
     margin-top: 8px;
-    text-transform: none;
-    letter-spacing: 0;
   }
 
   /* ── Scanning pulse ─────────────────────────────────────── */
@@ -545,7 +630,7 @@
     width: 6px;
     height: 6px;
     border-radius: 50%;
-    background: #dc2626;
+    background: #16a34a;
     margin-right: 6px;
     animation: pulse 2s infinite;
     vertical-align: middle;
@@ -556,111 +641,63 @@
     50% { opacity: 1; }
   }
 
-  /* ── Tablet ────────────────────────────────────────────── */
+  /* ── Tablet: 2 columns ──────────────────────────────────── */
   @media (max-width: 960px) {
-    .content {
-      grid-template-columns: 1fr 240px;
-      gap: 24px;
-    }
+    .feed, .skeleton { column-count: 2; }
   }
 
-  /* ── Mobile ────────────────────────────────────────────── */
-  @media (max-width: 700px) {
+  /* ── Mobile: 1 column ───────────────────────────────────── */
+  @media (max-width: 600px) {
     body { padding: 0; }
-    .page { padding: 0 16px; }
+    .page { padding: 0 12px; }
 
-    .countdown-banner { padding: 10px 12px; }
-    .countdown-timer { font-size: 1rem; }
-    .countdown-label { font-size: 0.5rem; letter-spacing: 2px; }
+    .header { padding: 28px 0 24px; }
 
-    .header {
-      padding: 28px 0 24px;
-    }
+    .feed, .skeleton { column-count: 1; }
 
-    .hero {
-      padding: 20px 0;
-      gap: 12px;
-    }
+    .card { padding: 16px; gap: 10px; }
+    .card-avatar { width: 34px; height: 34px; }
+    .card.xl .card-summary { font-size: 1.3rem; }
+    .card.lg .card-summary { font-size: 1.1rem; }
 
-    .hero-avatar {
-      width: 40px;
-      height: 40px;
-    }
-
-    .hero-tagline {
-      font-size: 0.95rem;
-    }
-
-    .hero-credit {
-      font-size: 0.7rem;
-    }
-
-    .content {
-      grid-template-columns: 1fr;
-    }
-
-    .sidebar { display: none; }
-    .ad-inline { display: block; }
-
-    .card { gap: 10px; padding: 18px 0; }
-    .card-avatar { width: 36px; height: 36px; }
-    .card.xl .card-summary { font-size: 1.6rem; }
-    .card.lg .card-summary { font-size: 1.4rem; }
-    .card.md .card-summary { font-size: 1.2rem; }
+    .cta-card { padding: 16px; gap: 10px; }
 
     .footer { padding: 28px 0 48px; margin-top: 32px; }
 
-    .skeleton-avatar { width: 36px; height: 36px; }
-  }
+    .skeleton-avatar { width: 34px; height: 34px; }
 
-  /* Desktop: hide inline ad */
-  @media (min-width: 701px) {
-    .ad-inline { display: none; }
+    .modal { padding: 24px; }
   }
 </style>
 </head>
 <body>
 
-<div class="countdown-banner">
-  <div class="countdown-label">The AI SaaS Bubble Collapses In</div>
-  <div class="countdown-timer" id="countdown"></div>
-  <div class="countdown-sub">March 18, 2027 &mdash; Are you ready?</div>
-</div>
-
 <div class="page">
   <div class="header">
     <h1>While You Were Sleeping</h1>
     <div class="sub">Everyone else shipped, raised, and got paid. Here's the proof.</div>
-    <div class="meta" id="meta">90 accounts tracked</div>
-  </div>
-
-  <div class="hero">
-    <img class="hero-avatar" src="https://unavatar.io/x/MTLFORBRKFST" alt="@MTLFORBRKFST" loading="eager">
-    <div class="hero-text">
-      <div class="hero-tagline">They shipped. You slept. Let's see the damage.</div>
-      <div class="hero-credit">curated by <a href="https://x.com/MTLFORBRKFST" target="_blank" rel="noopener">@MTLFORBRKFST</a></div>
+    <div class="header-credit">
+      <img src="https://unavatar.io/x/MTLFORBRKFST" alt="@MTLFORBRKFST" loading="eager">
+      <span>curated by <a href="https://x.com/MTLFORBRKFST" target="_blank" rel="noopener">@MTLFORBRKFST</a></span>
+    </div>
+    <div class="header-actions">
+      <button class="add-btn" id="addBtn">Add your account to the tracker</button>
     </div>
   </div>
 
   <div class="loading" id="loading">
     <div class="skeleton" id="skeleton">
-      <div class="skeleton-card"><div class="skeleton-avatar"></div><div class="skeleton-body"><div class="skeleton-line short"></div><div class="skeleton-line long"></div><div class="skeleton-line medium"></div></div></div>
-      <div class="skeleton-card"><div class="skeleton-avatar"></div><div class="skeleton-body"><div class="skeleton-line short"></div><div class="skeleton-line long"></div><div class="skeleton-line medium"></div></div></div>
-      <div class="skeleton-card"><div class="skeleton-avatar"></div><div class="skeleton-body"><div class="skeleton-line short"></div><div class="skeleton-line long"></div><div class="skeleton-line medium"></div></div></div>
-      <div class="skeleton-card"><div class="skeleton-avatar"></div><div class="skeleton-body"><div class="skeleton-line short"></div><div class="skeleton-line long"></div><div class="skeleton-line medium"></div></div></div>
+      <div class="skeleton-card"><div class="skeleton-avatar"></div><div class="skeleton-line short"></div><div class="skeleton-line long"></div><div class="skeleton-line medium"></div></div>
+      <div class="skeleton-card"><div class="skeleton-avatar"></div><div class="skeleton-line short"></div><div class="skeleton-line long"></div><div class="skeleton-line long"></div><div class="skeleton-line medium"></div></div>
+      <div class="skeleton-card"><div class="skeleton-avatar"></div><div class="skeleton-line short"></div><div class="skeleton-line long"></div></div>
+      <div class="skeleton-card"><div class="skeleton-avatar"></div><div class="skeleton-line short"></div><div class="skeleton-line long"></div><div class="skeleton-line medium"></div></div>
+      <div class="skeleton-card"><div class="skeleton-avatar"></div><div class="skeleton-line short"></div><div class="skeleton-line long"></div><div class="skeleton-line long"></div></div>
+      <div class="skeleton-card"><div class="skeleton-avatar"></div><div class="skeleton-line short"></div><div class="skeleton-line long"></div><div class="skeleton-line medium"></div></div>
     </div>
   </div>
 
-  <div class="content" id="content" style="display:none;">
+  <div id="content" style="display:none;">
     <div class="feed" id="feed"></div>
-
-    <aside class="sidebar">
-      <div class="ad-slot" id="ad-sidebar">
-        <div class="ad-label">Advertisement</div>
-        <div class="ad-cta">Your ad here.<br>Reach AI builders.</div>
-        <div class="ad-link">whileyouweresleeping.lol/advertise</div>
-      </div>
-    </aside>
   </div>
 
   <div class="footer" id="footer" style="display:none;">
@@ -674,46 +711,57 @@
   </div>
 </div>
 
+<!-- Add Account Modal -->
+<div class="modal-overlay" id="modal">
+  <div class="modal">
+    <button class="modal-close" id="modalClose">&times;</button>
+    <h2>Add your account to the tracker</h2>
+    <p>Get your wins featured on the wall. Up to 1 tweet per day showcasing your revenue milestones.</p>
+    <input class="modal-input" id="handleInput" type="text" placeholder="@yourhandle" autocomplete="off" spellcheck="false">
+    <button class="modal-submit" id="modalSubmit" disabled>Continue</button>
+  </div>
+</div>
+
 <script>
 (function() {
-  var ACCOUNTS_COUNT = 90;
   var REFRESH_MS = 60000;
   var shownIds = {};
   var shownCount = 0;
-  var lastScanTime = null;
-  var adInserted = false;
 
-  /* ── Countdown to March 18, 2026 ───────────────────────── */
-  var COLLAPSE_DATE = new Date('2027-03-18T00:00:00').getTime();
+  /* ── Modal logic ────────────────────────────────────────── */
+  var modal = document.getElementById('modal');
+  var handleInput = document.getElementById('handleInput');
+  var submitBtn = document.getElementById('modalSubmit');
 
-  function tickCountdown() {
-    var now = Date.now();
-    var diff = COLLAPSE_DATE - now;
-    var el = document.getElementById('countdown');
-    if (!el) return;
+  document.getElementById('addBtn').addEventListener('click', function() {
+    modal.classList.add('active');
+    handleInput.value = '';
+    submitBtn.disabled = true;
+    setTimeout(function() { handleInput.focus(); }, 100);
+  });
 
-    if (diff <= 0) {
-      el.textContent = 'THE BUBBLE HAS BURST';
-      return;
-    }
+  document.getElementById('modalClose').addEventListener('click', function() {
+    modal.classList.remove('active');
+  });
 
-    var days = Math.floor(diff / 86400000);
-    diff %= 86400000;
-    var hrs = Math.floor(diff / 3600000);
-    diff %= 3600000;
-    var mins = Math.floor(diff / 60000);
-    diff %= 60000;
-    var secs = Math.floor(diff / 1000);
+  modal.addEventListener('click', function(e) {
+    if (e.target === modal) modal.classList.remove('active');
+  });
 
-    el.innerHTML =
-      '<span class="num">' + days + '</span><span class="unit">DAYS</span>' +
-      '<span class="num">' + String(hrs).padStart(2, '0') + '</span><span class="unit">HRS</span>' +
-      '<span class="num">' + String(mins).padStart(2, '0') + '</span><span class="unit">MIN</span>' +
-      '<span class="num">' + String(secs).padStart(2, '0') + '</span><span class="unit">SEC</span>';
-  }
+  handleInput.addEventListener('input', function() {
+    var v = handleInput.value.replace(/^@/, '').trim();
+    submitBtn.disabled = v.length < 1;
+  });
 
-  tickCountdown();
-  setInterval(tickCountdown, 1000);
+  submitBtn.addEventListener('click', function() {
+    var handle = handleInput.value.replace(/^@/, '').trim();
+    if (!handle) return;
+    window.location.href = '/api/checkout?handle=' + encodeURIComponent(handle);
+  });
+
+  handleInput.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && !submitBtn.disabled) submitBtn.click();
+  });
 
   /* ── Utilities ──────────────────────────────────────────── */
   function formatNum(n) {
@@ -751,25 +799,46 @@
     return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   }
 
-  function updateMeta(scanTime) {
-    var el = document.getElementById('meta');
-    if (scanTime) lastScanTime = scanTime;
-    if (!lastScanTime) {
-      el.textContent = ACCOUNTS_COUNT + ' accounts tracked';
-      return;
-    }
-    var ago = Math.floor((Date.now() - lastScanTime) / 60000);
-    if (ago < 1) el.innerHTML = '<span class="scan-dot"></span>Updated just now';
-    else if (ago < 60) el.innerHTML = '<span class="scan-dot"></span>Updated ' + ago + ' min ago';
-    else el.textContent = 'Updated ' + Math.floor(ago / 60) + 'h ago';
-  }
-
   function updateCount() {
     var el = document.getElementById('count');
-    if (el) el.textContent = shownCount + ' revenue moments captured from ' + ACCOUNTS_COUNT + ' builders.';
+    if (el) el.textContent = shownCount + ' revenue moments captured.';
   }
 
   /* ── Card element builder ───────────────────────────────── */
+  function buildMediaHtml(media) {
+    if (!media || !media.length) return '';
+    var html = '';
+
+    // Separate photos and videos
+    var photos = media.filter(function(m) { return m.type === 'photo'; });
+    var videos = media.filter(function(m) { return m.type === 'video'; });
+
+    // Render videos first (show thumbnail with play icon)
+    for (var i = 0; i < videos.length; i++) {
+      var v = videos[i];
+      if (v.thumb) {
+        html += '<div class="card-media card-media-video">' +
+          '<img src="' + escapeHtml(v.thumb) + '" alt="" loading="lazy" onerror="this.parentNode.style.display=\'none\'">' +
+          '</div>';
+      }
+    }
+
+    // Render photos
+    if (photos.length === 1) {
+      html += '<div class="card-media">' +
+        '<img src="' + escapeHtml(photos[0].url) + '" alt="" loading="lazy" onerror="this.parentNode.style.display=\'none\'">' +
+        '</div>';
+    } else if (photos.length > 1) {
+      html += '<div class="card-media card-media-grid">';
+      for (var j = 0; j < Math.min(photos.length, 4); j++) {
+        html += '<img src="' + escapeHtml(photos[j].url) + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">';
+      }
+      html += '</div>';
+    }
+
+    return html;
+  }
+
   function createCard(card) {
     var t = tier(card.score);
     var el = document.createElement('a');
@@ -781,20 +850,22 @@
     var timeAgo = formatDate(card.date);
     var safeName = escapeHtml(card.name);
     var safeHandle = escapeHtml(card.handle);
+    var mediaHtml = buildMediaHtml(card.media);
 
     el.innerHTML =
-      '<div class="card-avatar-col">' +
+      '<div class="card-left">' +
         (card.avatar
           ? '<img class="card-avatar" src="' + escapeHtml(card.avatar) + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">'
           : '<div class="card-avatar"></div>') +
       '</div>' +
-      '<div class="card-body">' +
+      '<div class="card-right">' +
         '<div class="card-author-row">' +
           '<div class="card-name">' + safeName + '</div>' +
           '<div class="card-handle">@' + safeHandle + '</div>' +
           '<div class="card-date">' + timeAgo + '</div>' +
         '</div>' +
-        '<div class="card-summary"><span class="card-quote-mark">&ldquo;</span>' + highlightMoney(escapeHtml(card.summary)) + '</div>' +
+        '<div class="card-summary">' + highlightMoney(escapeHtml(card.summary)) + '</div>' +
+        mediaHtml +
         '<div class="card-stats">' +
           '<span>' + formatNum(card.likes) + ' likes</span>' +
           '<span>' + formatNum(card.views) + ' views</span>' +
@@ -805,20 +876,44 @@
     return el;
   }
 
-  function createAd() {
-    var div = document.createElement('div');
-    div.className = 'ad-inline';
-    div.innerHTML = '<div class="ad-slot"><div class="ad-label">Advertisement</div><div class="ad-cta">Your ad here. Reach AI builders.</div><div class="ad-link">whileyouweresleeping.lol/advertise</div></div>';
-    return div;
+  /* ── CTA card builder ──────────────────────────────────── */
+  function createCtaCard() {
+    var el = document.createElement('div');
+    el.className = 'cta-card';
+    el.innerHTML =
+      '<div class="cta-left">' +
+        '<div class="cta-avatar-placeholder"></div>' +
+      '</div>' +
+      '<div class="cta-right">' +
+        '<div class="cta-name-row">' +
+          '<div class="cta-line"></div>' +
+          '<div class="cta-line"></div>' +
+        '</div>' +
+        '<div class="cta-body">' +
+          '<div class="cta-line"></div>' +
+          '<div class="cta-line"></div>' +
+        '</div>' +
+        '<div class="cta-stats-row">' +
+          '<div class="cta-line"></div>' +
+          '<div class="cta-line"></div>' +
+          '<div class="cta-line"></div>' +
+        '</div>' +
+        '<div class="cta-label">Your account here</div>' +
+        '<div class="cta-sublabel">Get your wins featured on the wall.</div>' +
+      '</div>';
+    el.addEventListener('click', function() {
+      document.getElementById('addBtn').click();
+    });
+    return el;
   }
 
   /* ── Render: initial feed display ───────────────────────── */
+  var CTA_INTERVAL = 8;
+
   function renderInitial(cards) {
     var feed = document.getElementById('feed');
     feed.innerHTML = '';
-    adInserted = false;
 
-    // Sort by date descending (newest first)
     var sorted = cards.slice().sort(function(a, b) {
       return new Date(b.date) - new Date(a.date);
     });
@@ -830,29 +925,27 @@
       shownIds[card.id] = true;
       shownCount++;
 
-      // Insert inline ad after 3rd card
-      if (rendered === 3 && !adInserted) {
-        feed.appendChild(createAd());
-        adInserted = true;
+      if (rendered > 0 && rendered % CTA_INTERVAL === 0) {
+        var cta = createCtaCard();
+        cta.style.animationDelay = (rendered * 0.03) + 's';
+        feed.appendChild(cta);
       }
 
       var el = createCard(card);
-      el.style.animationDelay = (rendered * 0.04) + 's';
+      el.style.animationDelay = (rendered * 0.03) + 's';
       feed.appendChild(el);
       rendered++;
     }
   }
 
-  /* ── Render: prepend new cards at top ───────────────────── */
-  function prependNew(cards) {
+  /* ── Render: add new cards ──────────────────────────────── */
+  function addNew(cards) {
     var feed = document.getElementById('feed');
 
-    // Sort by date descending (newest first)
     var sorted = cards.slice().sort(function(a, b) {
       return new Date(b.date) - new Date(a.date);
     });
 
-    // Collect new cards
     var fresh = [];
     for (var i = 0; i < sorted.length; i++) {
       if (!shownIds[sorted[i].id]) fresh.push(sorted[i]);
@@ -860,17 +953,15 @@
 
     if (!fresh.length) return;
 
-    // Prepend in reverse so newest ends up at top
-    var firstCard = feed.querySelector('.card');
-    for (var j = fresh.length - 1; j >= 0; j--) {
+    for (var j = 0; j < fresh.length; j++) {
       var card = fresh[j];
       shownIds[card.id] = true;
       shownCount++;
 
       var el = createCard(card);
       el.className += ' card-fresh';
-      if (firstCard) {
-        feed.insertBefore(el, firstCard);
+      if (feed.firstChild) {
+        feed.insertBefore(el, feed.firstChild);
       } else {
         feed.appendChild(el);
       }
@@ -882,7 +973,7 @@
   /* ── Show the feed ──────────────────────────────────────── */
   function showFeed(cards) {
     document.getElementById('loading').style.display = 'none';
-    document.getElementById('content').style.display = 'grid';
+    document.getElementById('content').style.display = 'block';
     document.getElementById('footer').style.display = 'block';
     renderInitial(cards);
     updateCount();
@@ -894,33 +985,28 @@
     if (scanning) {
       loading.innerHTML =
         '<div class="empty-state">' +
-          '<p><span class="scan-dot"></span>Scanning ' + ACCOUNTS_COUNT + ' accounts</p>' +
-          '<div class="sub">The feed populates automatically. New cards will appear here.</div>' +
+          '<p><span class="scan-dot"></span>Scanning accounts</p>' +
+          '<div class="sub-text">The feed populates automatically. New cards will appear here.</div>' +
         '</div>';
     } else {
       loading.innerHTML =
         '<div class="empty-state">' +
           '<p>No revenue moments yet</p>' +
-          '<div class="sub">Check back shortly.</div>' +
+          '<div class="sub-text">Check back shortly.</div>' +
         '</div>';
     }
-    // Show skeleton placeholders
-    document.getElementById('skeleton').style.display = 'flex';
+    document.getElementById('skeleton').style.display = 'block';
   }
 
   /* ── Initial load ───────────────────────────────────────── */
   var feedLoaded = false;
 
   async function loadFeed() {
-    // Show skeleton immediately
-    document.getElementById('skeleton').style.display = 'flex';
+    document.getElementById('skeleton').style.display = 'block';
 
     try {
       var resp = await fetch('/api/feed');
       var data = await resp.json();
-
-      if (data.lastScan) lastScanTime = data.lastScan;
-      updateMeta(data.lastScan);
 
       if (data.cards && data.cards.length > 0) {
         feedLoaded = true;
@@ -928,12 +1014,10 @@
         return;
       }
 
-      // No cards yet — first deploy
       showEmpty(data.scanning);
 
     } catch (err) {
       console.error('Feed error:', err);
-      document.getElementById('meta').textContent = ACCOUNTS_COUNT + ' accounts tracked';
     }
   }
 
@@ -943,32 +1027,22 @@
       var resp = await fetch('/api/feed');
       var data = await resp.json();
 
-      if (data.lastScan) updateMeta(data.lastScan);
-
       if (!data.cards || !data.cards.length) return;
 
       if (!feedLoaded) {
-        // First cards have arrived since page load
         feedLoaded = true;
         showFeed(data.cards);
       } else {
-        // Prepend any new cards at the top
-        prependNew(data.cards);
+        addNew(data.cards);
       }
     } catch (err) {
       console.error('Refresh error:', err);
     }
   }
 
-  /* ── Meta timer (update "X min ago" text) ───────────────── */
-  function tickMeta() {
-    if (lastScanTime) updateMeta(lastScanTime);
-  }
-
   /* ── Boot ───────────────────────────────────────────────── */
   loadFeed();
   setInterval(autoRefresh, REFRESH_MS);
-  setInterval(tickMeta, 60000);
 })();
 </script>
 
