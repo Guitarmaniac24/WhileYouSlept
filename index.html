@@ -152,6 +152,8 @@
     display: none;
     flex-direction: column;
     gap: 0;
+    max-width: 800px;
+    margin: 24px auto 0;
   }
 
   .skeleton-card {
@@ -205,6 +207,27 @@
     gap: 0;
   }
 
+  /* ── New cards indicator ────────────────────────────────── */
+  .new-badge {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 10px 0;
+    border-bottom: 1px solid #e0e0e0;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+
+  .new-badge:hover { background: #f5f5f5; }
+
+  .new-badge span {
+    font-size: 0.7rem;
+    font-weight: 900;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: #dc2743;
+  }
+
   /* ── Card ───────────────────────────────────────────────── */
   .card {
     padding: 24px 0;
@@ -224,11 +247,20 @@
     background: #fafafa;
   }
 
-  .card:first-child {
+  .card:first-child, .card.no-top-pad {
     padding-top: 0;
   }
 
   @keyframes cardIn {
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .card-fresh {
+    animation: slideDown 0.5s ease forwards;
+  }
+
+  @keyframes slideDown {
+    from { opacity: 0; transform: translateY(-16px); }
     to { opacity: 1; transform: translateY(0); }
   }
 
@@ -426,6 +458,46 @@
     text-decoration: underline;
   }
 
+  /* ── Empty state ────────────────────────────────────────── */
+  .empty-state {
+    padding: 80px 0;
+    text-align: center;
+  }
+
+  .empty-state p {
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: #aaa;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  .empty-state .sub {
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: #ccc;
+    margin-top: 8px;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+
+  /* ── Scanning pulse ─────────────────────────────────────── */
+  .scan-dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #16a34a;
+    margin-right: 6px;
+    animation: pulse 2s infinite;
+    vertical-align: middle;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 0.4; }
+    50% { opacity: 1; }
+  }
+
   /* ── Tablet ────────────────────────────────────────────── */
   @media (max-width: 960px) {
     .content {
@@ -493,7 +565,7 @@
   <div class="header">
     <h1>While You Were Sleeping</h1>
     <div class="sub">A recap of what AI builders shipped while you were sleeping, scrolling, or planning.</div>
-    <div class="meta" id="meta">Loading feed...</div>
+    <div class="meta" id="meta">90 accounts tracked</div>
   </div>
 
   <div class="hero">
@@ -505,7 +577,6 @@
   </div>
 
   <div class="loading" id="loading">
-    <p>Scanning timelines<span class="dot">.</span><span class="dot">.</span><span class="dot">.</span></p>
     <div class="skeleton" id="skeleton">
       <div class="skeleton-card"><div class="skeleton-avatar"></div><div class="skeleton-body"><div class="skeleton-line short"></div><div class="skeleton-line long"></div><div class="skeleton-line medium"></div></div></div>
       <div class="skeleton-card"><div class="skeleton-avatar"></div><div class="skeleton-body"><div class="skeleton-line short"></div><div class="skeleton-line long"></div><div class="skeleton-line medium"></div></div></div>
@@ -538,75 +609,80 @@
 </div>
 
 <script>
-function formatNum(n) {
-  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
-  if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
-  return String(n);
-}
+(function() {
+  var ACCOUNTS_COUNT = 90;
+  var REFRESH_MS = 60000;
+  var shownIds = {};
+  var shownCount = 0;
+  var lastScanTime = null;
+  var adInserted = false;
 
-function formatDate(dateStr) {
-  if (!dateStr) return '';
-  const d = new Date(dateStr);
-  const now = new Date();
-  const diffH = Math.floor((now - d) / 3600000);
-  if (diffH < 1) return 'just now';
-  if (diffH < 24) return diffH + 'h ago';
-  const diffD = Math.floor(diffH / 24);
-  if (diffD === 1) return 'yesterday';
-  if (diffD < 7) return diffD + 'd ago';
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-}
+  /* ── Utilities ──────────────────────────────────────────── */
+  function formatNum(n) {
+    if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+    if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+    return String(n);
+  }
 
-function tier(score) {
-  if (score >= 35) return 'xl';
-  if (score >= 25) return 'lg';
-  if (score >= 15) return 'md';
-  return 'sm';
-}
+  function formatDate(dateStr) {
+    if (!dateStr) return '';
+    var d = new Date(dateStr);
+    var now = new Date();
+    var diffH = Math.floor((now - d) / 3600000);
+    if (diffH < 1) return 'just now';
+    if (diffH < 24) return diffH + 'h ago';
+    var diffD = Math.floor(diffH / 24);
+    if (diffD === 1) return 'yesterday';
+    if (diffD < 7) return diffD + 'd ago';
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  }
 
-function highlightMoney(text) {
-  return text.replace(/(\$[\d,.]+[KkMm]?(?:\/mo(?:nth)?|\/yr|\/year|\/day)?|\d+[KkMm]\s*(?:MRR|ARR))/g,
-    '<span class="money">$1</span>');
-}
+  function tier(score) {
+    if (score >= 35) return 'xl';
+    if (score >= 25) return 'lg';
+    if (score >= 15) return 'md';
+    return 'sm';
+  }
 
-function escapeHtml(str) {
-  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
+  function highlightMoney(text) {
+    return text.replace(/(\$[\d,.]+[KkMm]?(?:\/mo(?:nth)?|\/yr|\/year|\/day)?|\d+[KkMm]\s*(?:MRR|ARR))/g,
+      '<span class="money">$1</span>');
+  }
 
-function sortByDate(cards) {
-  return [...cards].sort((a, b) => new Date(b.date) - new Date(a.date));
-}
+  function escapeHtml(str) {
+    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
 
-const shownIds = new Set();
-const AD_INSERT_AFTER = 3;
-
-function renderCards(cards, animate) {
-  const feed = document.getElementById('feed');
-  const sorted = sortByDate(cards);
-  let rendered = 0;
-
-  sorted.forEach((card) => {
-    if (shownIds.has(card.id)) return;
-    shownIds.add(card.id);
-
-    if (rendered === AD_INSERT_AFTER) {
-      const adEl = document.createElement('div');
-      adEl.className = 'ad-inline';
-      adEl.innerHTML = '<div class="ad-slot"><div class="ad-label">Advertisement</div><div class="ad-cta">Your ad here. Reach AI builders.</div><div class="ad-link">whileyouweresleeping.lol/advertise</div></div>';
-      feed.appendChild(adEl);
+  function updateMeta(scanTime) {
+    var el = document.getElementById('meta');
+    if (scanTime) lastScanTime = scanTime;
+    if (!lastScanTime) {
+      el.textContent = ACCOUNTS_COUNT + ' accounts tracked';
+      return;
     }
+    var ago = Math.floor((Date.now() - lastScanTime) / 60000);
+    if (ago < 1) el.innerHTML = '<span class="scan-dot"></span>Updated just now';
+    else if (ago < 60) el.innerHTML = '<span class="scan-dot"></span>Updated ' + ago + ' min ago';
+    else el.textContent = 'Updated ' + Math.floor(ago / 60) + 'h ago';
+  }
 
-    const t = tier(card.score);
-    const el = document.createElement('a');
+  function updateCount() {
+    var el = document.getElementById('count');
+    if (el) el.textContent = shownCount + ' revenue moments captured from ' + ACCOUNTS_COUNT + ' builders.';
+  }
+
+  /* ── Card element builder ───────────────────────────────── */
+  function createCard(card) {
+    var t = tier(card.score);
+    var el = document.createElement('a');
     el.className = 'card ' + t;
     el.href = 'https://x.com/' + encodeURIComponent(card.handle) + '/status/' + encodeURIComponent(card.id);
     el.target = '_blank';
     el.rel = 'noopener';
-    el.style.animationDelay = (rendered * (animate ? 0.08 : 0.04)) + 's';
 
-    const timeAgo = formatDate(card.date);
-    const safeName = escapeHtml(card.name);
-    const safeHandle = escapeHtml(card.handle);
+    var timeAgo = formatDate(card.date);
+    var safeName = escapeHtml(card.name);
+    var safeHandle = escapeHtml(card.handle);
 
     el.innerHTML =
       '<div class="card-avatar-col">' +
@@ -618,9 +694,9 @@ function renderCards(cards, animate) {
         '<div class="card-author-row">' +
           '<div class="card-name">' + safeName + '</div>' +
           '<div class="card-handle">@' + safeHandle + '</div>' +
+          '<div class="card-date">' + timeAgo + '</div>' +
         '</div>' +
-        '<div class="card-time-ago">' + timeAgo + '</div>' +
-        '<div class="card-summary">' + highlightMoney(card.summary) + '</div>' +
+        '<div class="card-summary">' + highlightMoney(escapeHtml(card.summary)) + '</div>' +
         '<div class="card-stats">' +
           '<span>' + formatNum(card.likes) + ' likes</span>' +
           '<span>' + formatNum(card.views) + ' views</span>' +
@@ -628,97 +704,174 @@ function renderCards(cards, animate) {
         '</div>' +
       '</div>';
 
-    feed.appendChild(el);
-    rendered++;
-  });
-}
-
-let lastTimestamp = 0;
-
-function showFeed(cards) {
-  document.getElementById('loading').style.display = 'none';
-  document.getElementById('content').style.display = 'grid';
-  renderCards(cards, false);
-  document.getElementById('footer').style.display = 'block';
-  document.getElementById('count').textContent =
-    cards.length + ' revenue moments captured from ' + ACCOUNTS_COUNT + ' builders.';
-}
-
-const ACCOUNTS_COUNT = 90;
-
-async function pollForUpdates() {
-  var metaEl = document.getElementById('meta');
-  try {
-    metaEl.textContent = 'Checking for updates...';
-    var resp = await fetch('/api/refresh');
-    var data = await resp.json();
-    if (data.timestamp) lastTimestamp = data.timestamp;
-    if (data.cards && data.cards.length > 0) {
-      renderCards(data.cards, true);
-      document.getElementById('count').textContent =
-        shownIds.size + ' revenue moments captured from ' + ACCOUNTS_COUNT + ' builders.';
-    }
-    metaEl.textContent = 'Updated just now';
-  } catch (err) {
-    console.error('Poll error:', err);
-    metaEl.textContent = 'Update check failed';
+    return el;
   }
-}
 
-async function loadFeed() {
-  var loadingEl = document.getElementById('loading');
-  var metaEl = document.getElementById('meta');
+  function createAd() {
+    var div = document.createElement('div');
+    div.className = 'ad-inline';
+    div.innerHTML = '<div class="ad-slot"><div class="ad-label">Advertisement</div><div class="ad-cta">Your ad here. Reach AI builders.</div><div class="ad-link">whileyouweresleeping.lol/advertise</div></div>';
+    return div;
+  }
 
-  // Show skeleton after 300ms if still loading
-  var skeletonTimer = setTimeout(function() {
+  /* ── Render: initial feed display ───────────────────────── */
+  function renderInitial(cards) {
+    var feed = document.getElementById('feed');
+    feed.innerHTML = '';
+    adInserted = false;
+
+    // Sort by date descending (newest first)
+    var sorted = cards.slice().sort(function(a, b) {
+      return new Date(b.date) - new Date(a.date);
+    });
+
+    var rendered = 0;
+    for (var i = 0; i < sorted.length; i++) {
+      var card = sorted[i];
+      if (shownIds[card.id]) continue;
+      shownIds[card.id] = true;
+      shownCount++;
+
+      // Insert inline ad after 3rd card
+      if (rendered === 3 && !adInserted) {
+        feed.appendChild(createAd());
+        adInserted = true;
+      }
+
+      var el = createCard(card);
+      el.style.animationDelay = (rendered * 0.04) + 's';
+      feed.appendChild(el);
+      rendered++;
+    }
+  }
+
+  /* ── Render: prepend new cards at top ───────────────────── */
+  function prependNew(cards) {
+    var feed = document.getElementById('feed');
+
+    // Sort by date descending (newest first)
+    var sorted = cards.slice().sort(function(a, b) {
+      return new Date(b.date) - new Date(a.date);
+    });
+
+    // Collect new cards
+    var fresh = [];
+    for (var i = 0; i < sorted.length; i++) {
+      if (!shownIds[sorted[i].id]) fresh.push(sorted[i]);
+    }
+
+    if (!fresh.length) return;
+
+    // Prepend in reverse so newest ends up at top
+    var firstCard = feed.querySelector('.card');
+    for (var j = fresh.length - 1; j >= 0; j--) {
+      var card = fresh[j];
+      shownIds[card.id] = true;
+      shownCount++;
+
+      var el = createCard(card);
+      el.className += ' card-fresh';
+      if (firstCard) {
+        feed.insertBefore(el, firstCard);
+      } else {
+        feed.appendChild(el);
+      }
+    }
+
+    updateCount();
+  }
+
+  /* ── Show the feed ──────────────────────────────────────── */
+  function showFeed(cards) {
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('content').style.display = 'grid';
+    document.getElementById('footer').style.display = 'block';
+    renderInitial(cards);
+    updateCount();
+  }
+
+  /* ── Show empty state ───────────────────────────────────── */
+  function showEmpty(scanning) {
+    var loading = document.getElementById('loading');
+    if (scanning) {
+      loading.innerHTML =
+        '<div class="empty-state">' +
+          '<p><span class="scan-dot"></span>Scanning ' + ACCOUNTS_COUNT + ' accounts</p>' +
+          '<div class="sub">The feed populates automatically. New cards will appear here.</div>' +
+        '</div>';
+    } else {
+      loading.innerHTML =
+        '<div class="empty-state">' +
+          '<p>No revenue moments yet</p>' +
+          '<div class="sub">Check back shortly.</div>' +
+        '</div>';
+    }
+    // Show skeleton placeholders
     document.getElementById('skeleton').style.display = 'flex';
-  }, 300);
+  }
 
-  var maxRetries = 30;
-  var retryDelay = 4000;
+  /* ── Initial load ───────────────────────────────────────── */
+  var feedLoaded = false;
 
-  for (var attempt = 0; attempt < maxRetries; attempt++) {
+  async function loadFeed() {
+    // Show skeleton immediately
+    document.getElementById('skeleton').style.display = 'flex';
+
     try {
       var resp = await fetch('/api/feed');
       var data = await resp.json();
 
-      if (data.timestamp) lastTimestamp = data.timestamp;
+      if (data.lastScan) lastScanTime = data.lastScan;
+      updateMeta(data.lastScan);
 
       if (data.cards && data.cards.length > 0) {
-        clearTimeout(skeletonTimer);
+        feedLoaded = true;
         showFeed(data.cards);
-
-        if (data.cached) {
-          metaEl.textContent = "Showing today's feed — checking for updates...";
-          pollForUpdates();
-        } else {
-          metaEl.textContent = 'Updated just now';
-        }
         return;
       }
 
-      // No cards yet — server is still building
-      if (attempt === 0) {
-        loadingEl.querySelector('p').innerHTML =
-          'Building your feed<span class="dot">.</span><span class="dot">.</span><span class="dot">.</span>';
-        document.getElementById('skeleton').style.display = 'flex';
-      }
-      metaEl.textContent = 'Scanning ' + ACCOUNTS_COUNT + ' accounts — hang tight...';
+      // No cards yet — first deploy
+      showEmpty(data.scanning);
 
     } catch (err) {
-      console.error('Feed fetch error:', err);
+      console.error('Feed error:', err);
+      document.getElementById('meta').textContent = ACCOUNTS_COUNT + ' accounts tracked';
     }
-
-    // Wait before retrying
-    await new Promise(function(r) { setTimeout(r, retryDelay); });
   }
 
-  // Exhausted retries
-  clearTimeout(skeletonTimer);
-  loadingEl.innerHTML = '<p style="color:#999">Feed is still building. Refresh in a minute.</p>';
-}
+  /* ── Auto-refresh (silent, every 60s) ───────────────────── */
+  async function autoRefresh() {
+    try {
+      var resp = await fetch('/api/feed');
+      var data = await resp.json();
 
-loadFeed();
+      if (data.lastScan) updateMeta(data.lastScan);
+
+      if (!data.cards || !data.cards.length) return;
+
+      if (!feedLoaded) {
+        // First cards have arrived since page load
+        feedLoaded = true;
+        showFeed(data.cards);
+      } else {
+        // Prepend any new cards at the top
+        prependNew(data.cards);
+      }
+    } catch (err) {
+      console.error('Refresh error:', err);
+    }
+  }
+
+  /* ── Meta timer (update "X min ago" text) ───────────────── */
+  function tickMeta() {
+    if (lastScanTime) updateMeta(lastScanTime);
+  }
+
+  /* ── Boot ───────────────────────────────────────────────── */
+  loadFeed();
+  setInterval(autoRefresh, REFRESH_MS);
+  setInterval(tickMeta, 60000);
+})();
 </script>
 
 </body>

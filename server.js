@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
 
-// ── Load .env manually ──────────────────────────────────────
+/* ── Load .env ──────────────────────────────────────────── */
 const envPath = path.join(__dirname, '.env');
 if (fs.existsSync(envPath)) {
   fs.readFileSync(envPath, 'utf8').split('\n').forEach(line => {
@@ -13,35 +13,40 @@ if (fs.existsSync(envPath)) {
   });
 }
 
-const PORT = process.env.PORT || 3001;
-const TWITTER_KEY = process.env.TWITTER_API_KEY || '';
-const TWITTER_HOST = 'twitter-api45.p.rapidapi.com';
-const OPENAI_KEY = process.env.OPENAI_API_KEY;
-const CACHE_DIR = path.join(__dirname, '.cache');
+/* ── Config ─────────────────────────────────────────────── */
+const PORT          = process.env.PORT || 3001;
+const TWITTER_KEY   = process.env.TWITTER_API_KEY || '';
+const TWITTER_HOST  = 'twitter-api45.p.rapidapi.com';
+const OPENAI_KEY    = process.env.OPENAI_API_KEY;
+const CACHE_DIR     = path.join(__dirname, '.cache');
+const SCAN_COOLDOWN = 60 * 60 * 1000;   // 1 hour per account
+const LOOP_INTERVAL = 5 * 60 * 1000;    // check for stale accounts every 5 min
 
 if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR);
 
-// ── In-memory response cache (instant responses) ────────────
-let memoryFeedCache = null;       // { cards, timestamp, json, gzipped }
-let feedBuildInProgress = false;
+/* ── In-memory state ────────────────────────────────────── */
+let memoryFeedCache = null;      // { cards, timestamp, json, gzipped }
+let scanInProgress  = false;
+let lastScanDone    = null;      // epoch ms
+const scanTimes     = new Map(); // screenname → epoch ms
 
 function setMemoryCache(cards) {
-  const payload = { cards, cached: true, timestamp: Date.now() };
-  const json = JSON.stringify(payload);
-  memoryFeedCache = {
+  const payload = {
     cards,
     timestamp: Date.now(),
-    json,
-    gzipped: zlib.gzipSync(json),
+    lastScan: lastScanDone,
+    scanning: scanInProgress,
   };
+  const json = JSON.stringify(payload);
+  memoryFeedCache = { cards, timestamp: Date.now(), json, gzipped: zlib.gzipSync(json) };
 }
 
-// ── PostgreSQL (optional — falls back to file cache) ────────
+/* ── PostgreSQL (optional — falls back to file cache) ──── */
 let pool = null;
 
 async function initDb() {
   if (!process.env.DATABASE_URL) {
-    console.log('No DATABASE_URL — using file cache only');
+    console.log('No DATABASE_URL — file cache only');
     return;
   }
   try {
@@ -57,7 +62,7 @@ async function initDb() {
     console.log('PostgreSQL connected');
     await ensureSchema();
   } catch (err) {
-    console.error('PostgreSQL init failed, falling back to file cache:', err.message);
+    console.error('DB init failed:', err.message);
     pool = null;
   }
 }
@@ -104,83 +109,54 @@ async function ensureSchema() {
       last_scanned_at TIMESTAMPTZ DEFAULT NOW()
     )
   `);
-  // Performance indexes
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_tweets_screenname ON tweets(screenname)`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_feed_cards_score ON feed_cards(score DESC)`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_feed_cards_date ON feed_cards(created_at DESC)`);
-  console.log('DB schema + indexes ensured');
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_tweets_sn ON tweets(screenname)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_fc_date ON feed_cards(created_at DESC)`);
+  console.log('Schema ready');
 }
 
-// ── DB helper functions ─────────────────────────────────────
+/* ── DB helpers ─────────────────────────────────────────── */
 async function getKnownTweetIds(screenname) {
   if (!pool) return new Set();
   try {
-    const res = await pool.query(
-      'SELECT tweet_id FROM tweets WHERE screenname = $1',
-      [screenname]
-    );
-    return new Set(res.rows.map(r => r.tweet_id));
-  } catch (err) {
-    console.error('getKnownTweetIds error:', err.message);
-    return new Set();
-  }
+    const r = await pool.query('SELECT tweet_id FROM tweets WHERE screenname=$1', [screenname]);
+    return new Set(r.rows.map(x => x.tweet_id));
+  } catch (e) { return new Set(); }
 }
 
 async function storeTweets(tweets, screenname) {
-  if (!pool || tweets.length === 0) return;
+  if (!pool || !tweets.length) return;
   try {
-    // Batch insert using unnest for performance
-    const tweetIds = [], screennames = [], texts = [], favorites = [];
-    const viewsArr = [], bookmarksArr = [], retweetsArr = [], replyTos = [];
-    const createdAts = [], authorNames = [], authorScreenNames = [];
-    const authorAvatars = [], rawJsons = [];
-
+    const ids = [], sns = [], txts = [], favs = [], vws = [], bks = [], rts = [], rps = [];
+    const cas = [], ans = [], asns = [], aas = [], rjs = [];
     for (const t of tweets) {
-      const author = t.author || {};
-      tweetIds.push(t.tweet_id);
-      screennames.push(screenname);
-      texts.push(t.text || '');
-      favorites.push(t.favorites || 0);
-      viewsArr.push(String(t.views || '0'));
-      bookmarksArr.push(t.bookmarks || 0);
-      retweetsArr.push(t.retweets || 0);
-      replyTos.push(t.reply_to || null);
-      createdAts.push(t.created_at || null);
-      authorNames.push(author.name || '');
-      authorScreenNames.push(author.screen_name || '');
-      authorAvatars.push(author.avatar || '');
-      rawJsons.push(JSON.stringify(t));
+      const a = t.author || {};
+      ids.push(t.tweet_id); sns.push(screenname); txts.push(t.text || '');
+      favs.push(t.favorites || 0); vws.push(String(t.views || '0'));
+      bks.push(t.bookmarks || 0); rts.push(t.retweets || 0);
+      rps.push(t.reply_to || null); cas.push(t.created_at || null);
+      ans.push(a.name || ''); asns.push(a.screen_name || '');
+      aas.push(a.avatar || ''); rjs.push(JSON.stringify(t));
     }
-
     await pool.query(`
-      INSERT INTO tweets (tweet_id, screenname, text, favorites, views, bookmarks, retweets, reply_to, created_at, author_name, author_screen_name, author_avatar, raw_json)
-      SELECT * FROM unnest(
-        $1::text[], $2::text[], $3::text[], $4::int[], $5::text[],
-        $6::int[], $7::int[], $8::text[], $9::text[], $10::text[],
-        $11::text[], $12::text[], $13::jsonb[]
-      )
+      INSERT INTO tweets (tweet_id,screenname,text,favorites,views,bookmarks,retweets,
+        reply_to,created_at,author_name,author_screen_name,author_avatar,raw_json)
+      SELECT * FROM unnest($1::text[],$2::text[],$3::text[],$4::int[],$5::text[],
+        $6::int[],$7::int[],$8::text[],$9::text[],$10::text[],$11::text[],$12::text[],$13::jsonb[])
       ON CONFLICT (tweet_id) DO NOTHING
-    `, [tweetIds, screennames, texts, favorites, viewsArr, bookmarksArr,
-        retweetsArr, replyTos, createdAts, authorNames, authorScreenNames,
-        authorAvatars, rawJsons]);
+    `, [ids, sns, txts, favs, vws, bks, rts, rps, cas, ans, asns, aas, rjs]);
   } catch (err) {
-    console.error('storeTweets batch error:', err.message);
-    // Fallback to individual inserts
     for (const t of tweets) {
       try {
-        const author = t.author || {};
+        const a = t.author || {};
         await pool.query(`
-          INSERT INTO tweets (tweet_id, screenname, text, favorites, views, bookmarks, retweets, reply_to, created_at, author_name, author_screen_name, author_avatar, raw_json)
+          INSERT INTO tweets (tweet_id,screenname,text,favorites,views,bookmarks,retweets,
+            reply_to,created_at,author_name,author_screen_name,author_avatar,raw_json)
           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
           ON CONFLICT (tweet_id) DO NOTHING
-        `, [
-          t.tweet_id, screenname, t.text,
-          t.favorites || 0, String(t.views || '0'), t.bookmarks || 0, t.retweets || 0,
-          t.reply_to || null, t.created_at || null,
-          author.name || '', author.screen_name || '', author.avatar || '',
-          JSON.stringify(t)
-        ]);
-      } catch (e) { /* skip individual failures */ }
+        `, [t.tweet_id, screenname, t.text, t.favorites || 0, String(t.views || '0'),
+            t.bookmarks || 0, t.retweets || 0, t.reply_to || null, t.created_at || null,
+            (a.name || ''), (a.screen_name || ''), (a.avatar || ''), JSON.stringify(t)]);
+      } catch (e) { /* skip */ }
     }
   }
 }
@@ -191,71 +167,116 @@ async function updateScanState(screenname, lastTweetId) {
     await pool.query(`
       INSERT INTO scan_state (screenname, last_tweet_id, last_scanned_at)
       VALUES ($1, $2, NOW())
-      ON CONFLICT (screenname) DO UPDATE SET last_tweet_id = $2, last_scanned_at = NOW()
+      ON CONFLICT (screenname) DO UPDATE SET last_tweet_id=$2, last_scanned_at=NOW()
     `, [screenname, lastTweetId]);
-  } catch (err) {
-    console.error('updateScanState error:', err.message);
-  }
+  } catch (e) { /* skip */ }
 }
 
 async function getFeedCardsFromDb() {
   if (!pool) return null;
   try {
-    const res = await pool.query(
-      'SELECT id, handle, name, avatar, summary, score, likes, views, bookmarks, date FROM feed_cards ORDER BY score DESC, created_at DESC'
+    const r = await pool.query(
+      'SELECT id,handle,name,avatar,summary,score,likes,views,bookmarks,date FROM feed_cards ORDER BY created_at DESC'
     );
-    if (res.rows.length === 0) return null;
-    return res.rows;
-  } catch (err) {
-    console.error('getFeedCardsFromDb error:', err.message);
-    return null;
-  }
+    return r.rows.length ? r.rows : null;
+  } catch (e) { return null; }
 }
 
 async function storeFeedCards(cards) {
-  if (!pool || cards.length === 0) return;
+  if (!pool || !cards.length) return;
   try {
-    // Batch upsert
-    const ids = [], handles = [], names = [], avatars = [], summaries = [];
-    const scores = [], likes = [], views = [], bookmarks = [], dates = [];
-
+    const ids = [], hs = [], ns = [], avs = [], sums = [];
+    const scs = [], lks = [], vws = [], bks = [], dts = [];
     for (const c of cards) {
-      ids.push(c.id); handles.push(c.handle); names.push(c.name);
-      avatars.push(c.avatar); summaries.push(c.summary); scores.push(c.score);
-      likes.push(c.likes); views.push(c.views); bookmarks.push(c.bookmarks);
-      dates.push(c.date);
+      ids.push(c.id); hs.push(c.handle); ns.push(c.name);
+      avs.push(c.avatar); sums.push(c.summary); scs.push(c.score);
+      lks.push(c.likes); vws.push(c.views); bks.push(c.bookmarks);
+      dts.push(c.date);
     }
-
     await pool.query(`
-      INSERT INTO feed_cards (id, handle, name, avatar, summary, score, likes, views, bookmarks, date)
-      SELECT * FROM unnest(
-        $1::text[], $2::text[], $3::text[], $4::text[], $5::text[],
-        $6::real[], $7::int[], $8::int[], $9::int[], $10::text[]
-      )
+      INSERT INTO feed_cards (id,handle,name,avatar,summary,score,likes,views,bookmarks,date)
+      SELECT * FROM unnest($1::text[],$2::text[],$3::text[],$4::text[],$5::text[],
+        $6::real[],$7::int[],$8::int[],$9::int[],$10::text[])
       ON CONFLICT (id) DO UPDATE SET
-        summary = EXCLUDED.summary, score = EXCLUDED.score,
-        likes = EXCLUDED.likes, views = EXCLUDED.views,
-        bookmarks = EXCLUDED.bookmarks, date = EXCLUDED.date
-    `, [ids, handles, names, avatars, summaries, scores, likes, views, bookmarks, dates]);
+        summary=EXCLUDED.summary, score=EXCLUDED.score,
+        likes=EXCLUDED.likes, views=EXCLUDED.views,
+        bookmarks=EXCLUDED.bookmarks, date=EXCLUDED.date
+    `, [ids, hs, ns, avs, sums, scs, lks, vws, bks, dts]);
   } catch (err) {
-    console.error('storeFeedCards batch error:', err.message);
-    // Fallback to individual
     for (const c of cards) {
       try {
         await pool.query(`
-          INSERT INTO feed_cards (id, handle, name, avatar, summary, score, likes, views, bookmarks, date)
+          INSERT INTO feed_cards (id,handle,name,avatar,summary,score,likes,views,bookmarks,date)
           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
           ON CONFLICT (id) DO UPDATE SET
-            summary = EXCLUDED.summary, score = EXCLUDED.score,
-            likes = EXCLUDED.likes, views = EXCLUDED.views,
-            bookmarks = EXCLUDED.bookmarks, date = EXCLUDED.date
+            summary=EXCLUDED.summary, score=EXCLUDED.score,
+            likes=EXCLUDED.likes, views=EXCLUDED.views,
+            bookmarks=EXCLUDED.bookmarks, date=EXCLUDED.date
         `, [c.id, c.handle, c.name, c.avatar, c.summary, c.score, c.likes, c.views, c.bookmarks, c.date]);
       } catch (e) { /* skip */ }
     }
   }
 }
 
-// ── Top ~100 AI SaaS builder accounts ───────────────────────
+/* ── File cache ─────────────────────────────────────────── */
+function cacheGet(name) {
+  const p = path.join(CACHE_DIR, `${name}.json`);
+  if (!fs.existsSync(p)) return null;
+  try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch (e) { return null; }
+}
+
+function cacheSet(name, data) {
+  try { fs.writeFileSync(path.join(CACHE_DIR, `${name}.json`), JSON.stringify(data)); } catch (e) { /* skip */ }
+}
+
+function cacheAge(name) {
+  const p = path.join(CACHE_DIR, `${name}.json`);
+  if (!fs.existsSync(p)) return Infinity;
+  try { return Date.now() - fs.statSync(p).mtimeMs; } catch (e) { return Infinity; }
+}
+
+function pruneCache() {
+  try {
+    for (const f of fs.readdirSync(CACHE_DIR)) {
+      if (!f.endsWith('.json')) continue;
+      if (f === 'feed.json' || f === 'scan_times.json') continue;
+      const full = path.join(CACHE_DIR, f);
+      try {
+        if (Date.now() - fs.statSync(full).mtimeMs > 2 * SCAN_COOLDOWN) fs.unlinkSync(full);
+      } catch (e) { /* skip */ }
+    }
+  } catch (e) { /* skip */ }
+}
+
+pruneCache();
+
+/* ── Scan time persistence (survives restarts) ──────────── */
+function loadScanTimes() {
+  const d = cacheGet('scan_times');
+  if (d) for (const [k, v] of Object.entries(d)) scanTimes.set(k, v);
+}
+
+function saveScanTimes() {
+  const o = {};
+  for (const [k, v] of scanTimes) o[k] = v;
+  cacheSet('scan_times', o);
+}
+
+async function warmScanTimesFromDb() {
+  if (!pool) return;
+  try {
+    const r = await pool.query('SELECT screenname, last_scanned_at FROM scan_state');
+    for (const row of r.rows) {
+      const t = new Date(row.last_scanned_at).getTime();
+      if (!scanTimes.has(row.screenname) || t > scanTimes.get(row.screenname)) {
+        scanTimes.set(row.screenname, t);
+      }
+    }
+    console.log(`Scan state loaded for ${r.rows.length} accounts`);
+  } catch (e) { /* skip */ }
+}
+
+/* ── Accounts ───────────────────────────────────────────── */
 const ACCOUNTS = [
   'levelsio','marc_louvion','tdinh_me','dannypostmaa','mckaywrigley',
   'bentossell','shpigford','thesamparr','dvassallo','nathanbarry',
@@ -278,67 +299,27 @@ const ACCOUNTS = [
   'swyx','karpathy',
 ];
 
-// ── Helpers ─────────────────────────────────────────────────
-function todayStr() {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function cachePath(name) {
-  return path.join(CACHE_DIR, `${name}_${todayStr()}.json`);
-}
-
-function readCache(name) {
-  const p = cachePath(name);
-  if (fs.existsSync(p)) {
-    try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch (e) {}
-  }
-  return null;
-}
-
-function writeCache(name, data) {
-  try { fs.writeFileSync(cachePath(name), JSON.stringify(data)); } catch (e) {}
-}
-
-function pruneOldCache() {
-  const today = todayStr();
-  try {
-    for (const f of fs.readdirSync(CACHE_DIR)) {
-      if (f.endsWith('.json') && !f.includes(today)) {
-        fs.unlinkSync(path.join(CACHE_DIR, f));
-      }
-    }
-  } catch (e) {}
-}
-
-pruneOldCache();
-
-// ── Gzip helper ─────────────────────────────────────────────
-function sendJson(req, res, statusCode, obj) {
+/* ── Response helpers ───────────────────────────────────── */
+function sendJson(req, res, code, obj) {
   const json = JSON.stringify(obj);
-  const acceptGzip = (req.headers['accept-encoding'] || '').includes('gzip');
-
+  const gz = (req.headers['accept-encoding'] || '').includes('gzip');
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
-
-  if (acceptGzip && json.length > 512) {
+  if (gz && json.length > 512) {
     res.setHeader('Content-Encoding', 'gzip');
-    res.writeHead(statusCode);
-    zlib.gzip(json, (err, compressed) => {
-      res.end(err ? json : compressed);
-    });
+    res.writeHead(code);
+    zlib.gzip(json, (e, buf) => res.end(e ? json : buf));
   } else {
-    res.writeHead(statusCode);
+    res.writeHead(code);
     res.end(json);
   }
 }
 
 function sendCachedFeed(req, res) {
   if (!memoryFeedCache) return false;
-
-  const acceptGzip = (req.headers['accept-encoding'] || '').includes('gzip');
+  const gz = (req.headers['accept-encoding'] || '').includes('gzip');
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
-
-  if (acceptGzip) {
+  res.setHeader('Cache-Control', 'public, max-age=30, stale-while-revalidate=120');
+  if (gz) {
     res.setHeader('Content-Encoding', 'gzip');
     res.writeHead(200);
     res.end(memoryFeedCache.gzipped);
@@ -349,132 +330,106 @@ function sendCachedFeed(req, res) {
   return true;
 }
 
-// ── Static file cache (pre-read into memory) ────────────────
+/* ── Static file cache ──────────────────────────────────── */
 const staticCache = new Map();
 
 function preloadStatic() {
-  const files = ['index.html'];
-  const mimeTypes = {
-    '.html': 'text/html; charset=utf-8',
-    '.js': 'application/javascript',
-    '.css': 'text/css',
-    '.json': 'application/json',
-    '.png': 'image/png',
-    '.jpg': 'image/jpeg',
-    '.ico': 'image/x-icon',
-    '.svg': 'image/svg+xml',
+  const mimes = {
+    '.html': 'text/html; charset=utf-8', '.js': 'application/javascript',
+    '.css': 'text/css', '.json': 'application/json',
+    '.png': 'image/png', '.jpg': 'image/jpeg',
+    '.ico': 'image/x-icon', '.svg': 'image/svg+xml',
   };
-
-  for (const file of files) {
-    const fullPath = path.join(__dirname, file);
-    if (fs.existsSync(fullPath)) {
-      const content = fs.readFileSync(fullPath);
-      const ext = path.extname(file);
-      const mime = mimeTypes[ext] || 'text/plain';
-      staticCache.set('/' + file, {
-        content,
-        gzipped: zlib.gzipSync(content),
-        mime,
-      });
-      if (file === 'index.html') {
-        staticCache.set('/', { content, gzipped: zlib.gzipSync(content), mime });
-      }
-    }
+  for (const file of ['index.html']) {
+    const full = path.join(__dirname, file);
+    if (!fs.existsSync(full)) continue;
+    const content = fs.readFileSync(full);
+    const ext = path.extname(file);
+    const entry = { content, gzipped: zlib.gzipSync(content), mime: mimes[ext] || 'text/plain' };
+    staticCache.set('/' + file, entry);
+    if (file === 'index.html') staticCache.set('/', entry);
   }
-  console.log(`Pre-cached ${staticCache.size} static files`);
 }
 
-// ── HTTPS request helper ────────────────────────────────────
-function httpsRequest(options, body) {
+/* ── HTTPS helper ───────────────────────────────────────── */
+function httpsReq(opts, body) {
   return new Promise((resolve, reject) => {
-    const req = https.request(options, (res) => {
-      let data = '';
-      res.on('data', c => data += c);
+    const r = https.request(opts, res => {
+      let d = '';
+      res.on('data', c => d += c);
       res.on('end', () => {
-        try { resolve(JSON.parse(data)); }
-        catch (e) { reject(new Error('Invalid JSON: ' + data.slice(0, 200))); }
+        try { resolve(JSON.parse(d)); }
+        catch (e) { reject(new Error('Bad JSON: ' + d.slice(0, 200))); }
       });
     });
-    req.on('error', reject);
-    req.setTimeout(30000, () => { req.destroy(); reject(new Error('Timeout')); });
-    if (body) req.write(body);
-    req.end();
+    r.on('error', reject);
+    r.setTimeout(30000, () => { r.destroy(); reject(new Error('Timeout')); });
+    if (body) r.write(body);
+    r.end();
   });
 }
 
-// ── Twitter API ─────────────────────────────────────────────
+/* ── Twitter API ────────────────────────────────────────── */
 async function fetchTimeline(screenname) {
-  const cached = readCache(`tweets_${screenname}`);
-  if (cached) return cached;
-
-  const data = await httpsRequest({
+  if (cacheAge(`tweets_${screenname}`) < SCAN_COOLDOWN) {
+    const c = cacheGet(`tweets_${screenname}`);
+    if (c) return c;
+  }
+  const data = await httpsReq({
     hostname: TWITTER_HOST,
     path: `/timeline.php?screenname=${encodeURIComponent(screenname)}`,
     method: 'GET',
-    headers: {
-      'x-rapidapi-key': TWITTER_KEY,
-      'x-rapidapi-host': TWITTER_HOST,
-    }
+    headers: { 'x-rapidapi-key': TWITTER_KEY, 'x-rapidapi-host': TWITTER_HOST },
   });
-
-  if (data && data.timeline) {
-    writeCache(`tweets_${screenname}`, data);
-  }
+  if (data && data.timeline) cacheSet(`tweets_${screenname}`, data);
   return data;
 }
 
-// ── Revenue / money-only pre-filter ─────────────────────────
+/* ── Revenue filter ─────────────────────────────────────── */
 function isMoneyTweet(text) {
-  const hasDollar = /\$[\d,]+/.test(text);
-  const hasRevenueKeyword = /(?:MRR|ARR|revenue|income|profit|margin|sales)/i.test(text);
-  const hasMoneyKeyword = /(?:made|earned|grossed|netted|bringing in|generating)/i.test(text);
-  const hasSoldKeyword = /(?:SOLD FOR|ACQUIRED FOR|sold.*\$|acquisition.*\$)/i.test(text);
-  const hasCustomerProof = /(?:paying customers|paid users|subscribers|new customers|purchases|conversions)/i.test(text) && /\d/.test(text);
-  const hasRevenueNumber = /\d+[KkMm]?\s*(?:MRR|ARR|\/mo|\/month|\/year|revenue)/i.test(text);
-
-  const isAdvice = /(?:^how to|^why you|^stop |^don't|should you|^the secret|^my advice|^tip:|^thread)/i.test(text);
-  const isPromo = /(?:^check out|^join |^sign up|^use code|^discount|^giveaway)/i.test(text);
-
+  const hasDollar     = /\$[\d,]+/.test(text);
+  const hasRevKW      = /(?:MRR|ARR|revenue|income|profit|margin|sales)/i.test(text);
+  const hasMoneyKW    = /(?:made|earned|grossed|netted|bringing in|generating)/i.test(text);
+  const hasSold       = /(?:SOLD FOR|ACQUIRED FOR|sold.*\$|acquisition.*\$)/i.test(text);
+  const hasCustProof  = /(?:paying customers|paid users|subscribers|new customers|purchases|conversions)/i.test(text) && /\d/.test(text);
+  const hasRevNum     = /\d+[KkMm]?\s*(?:MRR|ARR|\/mo|\/month|\/year|revenue)/i.test(text);
+  const isAdvice      = /(?:^how to|^why you|^stop |^don't|should you|^the secret|^my advice|^tip:|^thread)/i.test(text);
+  const isPromo       = /(?:^check out|^join |^sign up|^use code|^discount|^giveaway)/i.test(text);
   if (isAdvice || isPromo) return false;
-
-  return hasDollar || hasSoldKeyword || hasCustomerProof || hasRevenueNumber ||
-    (hasRevenueKeyword && /\d/.test(text)) ||
-    (hasMoneyKeyword && /\$/.test(text));
+  return hasDollar || hasSold || hasCustProof || hasRevNum ||
+    (hasRevKW && /\d/.test(text)) || (hasMoneyKW && /\$/.test(text));
 }
 
-// ── FOMO scoring — revenue-focused only ─────────────────────
+/* ── FOMO scoring ───────────────────────────────────────── */
 function fomoScore(tweet) {
   const text = tweet.text || '';
-
   if (!isMoneyTweet(text)) return 0;
 
-  const favs = tweet.favorites || 0;
-  const views = parseInt(tweet.views) || 0;
+  const favs      = tweet.favorites || 0;
+  const views     = parseInt(tweet.views) || 0;
   const bookmarks = tweet.bookmarks || 0;
-  const retweets = tweet.retweets || 0;
+  const retweets  = tweet.retweets || 0;
 
   let score = 10;
-
   score += Math.min(favs / 100, 8);
   score += Math.min(views / 10000, 8);
   score += Math.min(bookmarks / 50, 6);
   score += Math.min(retweets / 20, 4);
 
-  const dollarRe = /\$\s*([\d,]+(?:\.\d+)?)\s*([KkMm])?/g;
-  let m;
-  let maxDollar = 0;
-  while ((m = dollarRe.exec(text)) !== null) {
-    let val = parseFloat(m[1].replace(/,/g, ''));
-    if (m[2] && /[Kk]/.test(m[2])) val *= 1000;
-    if (m[2] && /[Mm]/.test(m[2])) val *= 1000000;
-    if (val > maxDollar) maxDollar = val;
+  const re = /\$\s*([\d,]+(?:\.\d+)?)\s*([KkMm])?/g;
+  let m, maxDollar = 0;
+  while ((m = re.exec(text)) !== null) {
+    let v = parseFloat(m[1].replace(/,/g, ''));
+    if (m[2] && /[Kk]/.test(m[2])) v *= 1000;
+    if (m[2] && /[Mm]/.test(m[2])) v *= 1000000;
+    if (v > maxDollar) maxDollar = v;
   }
 
-  if (maxDollar >= 1000000) score += 30;
-  else if (maxDollar >= 100000) score += 20;
-  else if (maxDollar >= 50000) score += 15;
-  else if (maxDollar >= 10000) score += 10;
-  else if (maxDollar >= 1000) score += 5;
+  if (maxDollar >= 1e6)      score += 30;
+  else if (maxDollar >= 1e5) score += 20;
+  else if (maxDollar >= 5e4) score += 15;
+  else if (maxDollar >= 1e4) score += 10;
+  else if (maxDollar >= 1e3) score += 5;
 
   if (/\b(?:SOLD|ACQUIRED|acquisition|exit)\b/i.test(text)) score += 15;
   if (/(?:MRR|ARR)/i.test(text)) score += 5;
@@ -483,9 +438,9 @@ function fomoScore(tweet) {
   return Math.round(score * 10) / 10;
 }
 
-// ── OpenAI summarization — strict revenue-only ──────────────
+/* ── OpenAI summarization ───────────────────────────────── */
 async function summarizeTweets(tweetsWithAuthors) {
-  if (!OPENAI_KEY || tweetsWithAuthors.length === 0) return tweetsWithAuthors.map(() => null);
+  if (!OPENAI_KEY || !tweetsWithAuthors.length) return tweetsWithAuthors.map(() => null);
 
   const prompt = tweetsWithAuthors.map((t, i) =>
     `[${i}] @${t.author.screen_name} (${t.author.name}): "${t.text}"`
@@ -524,21 +479,19 @@ STRICT RULES:
       max_tokens: 2000,
     });
 
-    const resp = await httpsRequest({
+    const resp = await httpsReq({
       hostname: 'api.openai.com',
       path: '/v1/chat/completions',
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${OPENAI_KEY}`,
         'Content-Type': 'application/json',
-      }
+      },
     }, body);
 
     const content = resp.choices?.[0]?.message?.content || '[]';
-    const jsonMatch = content.match(/\[[\s\S]*\]/);
-    if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]);
-    }
+    const match = content.match(/\[[\s\S]*\]/);
+    if (match) return JSON.parse(match[0]);
   } catch (err) {
     console.error('OpenAI error:', err.message);
   }
@@ -546,209 +499,188 @@ STRICT RULES:
   return tweetsWithAuthors.map(() => null);
 }
 
-// ── Build the feed (incremental) ────────────────────────────
-let feedBuildPromise = null;
-
-async function buildFeed() {
-  // If already building, wait for the existing build to finish
-  if (feedBuildInProgress && feedBuildPromise) {
-    console.log('Feed build already in progress, waiting...');
-    return feedBuildPromise;
-  }
-  feedBuildInProgress = true;
-
-  feedBuildPromise = _buildFeedInner();
-  try {
-    return await feedBuildPromise;
-  } finally {
-    feedBuildPromise = null;
-  }
-}
-
-async function _buildFeedInner() {
+/* ── Background scan (runs independently of user requests) ─ */
+async function backgroundScan() {
+  if (scanInProgress) return;
+  scanInProgress = true;
+  if (memoryFeedCache) setMemoryCache(memoryFeedCache.cards);
 
   try {
-    // 1. Check DB for existing cards first
-    const dbCards = await getFeedCardsFromDb();
-    const fileCards = readCache('feed');
-    const existingCards = dbCards || fileCards || [];
+    // Load current feed
+    const existing = memoryFeedCache?.cards || await getFeedCardsFromDb() || cacheGet('feed') || [];
+    const existingIds = new Set(existing.map(c => c.id));
 
-    // Warm memory cache immediately if we have data
-    if (existingCards.length > 0 && !memoryFeedCache) {
-      setMemoryCache(existingCards);
-      console.log(`Warmed memory cache with ${existingCards.length} existing cards`);
+    // Ensure memory cache is warm
+    if (!memoryFeedCache && existing.length) setMemoryCache(existing);
+
+    // Find accounts due for a scan (not scanned in the last hour)
+    const stale = ACCOUNTS.filter(a => {
+      const last = scanTimes.get(a) || 0;
+      return Date.now() - last >= SCAN_COOLDOWN;
+    });
+
+    if (!stale.length) {
+      console.log('[scan] All accounts scanned recently, nothing to do');
+      scanInProgress = false;
+      if (memoryFeedCache) setMemoryCache(memoryFeedCache.cards);
+      return;
     }
 
-    if (existingCards.length > 0) {
-      console.log(`Found ${existingCards.length} existing feed cards, checking for new tweets...`);
-    } else {
-      console.log('Building fresh feed...');
-    }
+    console.log(`[scan] ${stale.length}/${ACCOUNTS.length} accounts due for refresh`);
 
-    const existingIds = new Set(existingCards.map(c => c.id));
-    const allNewTweets = [];
-    let fetched = 0;
-    let skipped = 0;
+    const newTweets = [];
+    let errors = 0;
+    let scanned = 0;
 
-    for (const account of ACCOUNTS) {
-      fetched++;
-      process.stdout.write(`  [${fetched}/${ACCOUNTS.length}] @${account}...`);
+    for (const account of stale) {
+      scanned++;
       try {
         const data = await fetchTimeline(account);
         if (data && data.timeline) {
-          const knownIds = await getKnownTweetIds(account);
-
+          const known = await getKnownTweetIds(account);
           let found = 0;
-          for (const tweet of data.timeline) {
-            if (knownIds.has(tweet.tweet_id) || existingIds.has(tweet.tweet_id)) continue;
 
+          for (const tweet of data.timeline) {
+            // Skip tweets already in DB or already in feed — never re-process
+            if (known.has(tweet.tweet_id) || existingIds.has(tweet.tweet_id)) continue;
             const score = fomoScore(tweet);
-            if (score > 0) {
-              allNewTweets.push({ ...tweet, _score: score });
-              found++;
-            }
+            if (score > 0) { newTweets.push({ ...tweet, _score: score }); found++; }
           }
 
-          // Batch store all timeline tweets in DB
-          if (data.timeline.length > 0) {
+          // Store ALL timeline tweets in DB (dedup by tweet_id)
+          if (data.timeline.length) {
             await storeTweets(data.timeline, account);
             await updateScanState(account, data.timeline[0].tweet_id);
           }
 
-          console.log(` ${found} new money tweets`);
+          if (found > 0) console.log(`  [${scanned}/${stale.length}] @${account}: ${found} new`);
         } else {
-          console.log(' no timeline');
+          console.log(`  [${scanned}/${stale.length}] @${account}: no data`);
         }
-      } catch (err) {
-        console.log(` error: ${err.message}`);
-        skipped++;
+        scanTimes.set(account, Date.now());
+      } catch (e) {
+        console.log(`  [${scanned}/${stale.length}] @${account}: ${e.message}`);
+        errors++;
       }
-      if (!readCache(`tweets_${account}`)) {
+
+      // Rate-limit delay when we hit the actual API (cache age < 2s means fresh fetch)
+      if (cacheAge(`tweets_${account}`) < 2000) {
         await new Promise(r => setTimeout(r, 400));
       }
     }
 
-    console.log(`\nNew money tweets found: ${allNewTweets.length} (${skipped} accounts failed)`);
+    saveScanTimes();
+    console.log(`[scan] Found ${newTweets.length} new money tweets (${errors} errors)`);
 
-    if (allNewTweets.length === 0 && existingCards.length > 0) {
-      console.log('No new tweets — returning existing feed\n');
-      setMemoryCache(existingCards);
-      return existingCards;
+    if (!newTweets.length) {
+      lastScanDone = Date.now();
+      scanInProgress = false;
+      if (memoryFeedCache) setMemoryCache(memoryFeedCache.cards);
+      return;
     }
 
-    // 2. Score and sort new tweets, take top 50
-    allNewTweets.sort((a, b) => b._score - a._score);
-    const topNewTweets = allNewTweets.slice(0, 50);
-    topNewTweets.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    // Summarize only NEW tweets (never re-summarize)
+    newTweets.sort((a, b) => b._score - a._score);
+    const top = newTweets.slice(0, 50);
 
-    // 3. Summarize only new tweets
     const summaries = [];
-    for (let i = 0; i < topNewTweets.length; i += 10) {
-      const batch = topNewTweets.slice(i, i + 10);
-      console.log(`  Summarizing batch ${Math.floor(i / 10) + 1}...`);
-      const batchSummaries = await summarizeTweets(batch);
-      summaries.push(...batchSummaries);
+    for (let i = 0; i < top.length; i += 10) {
+      const batch = top.slice(i, i + 10);
+      console.log(`[scan] Summarizing batch ${Math.floor(i / 10) + 1}...`);
+      summaries.push(...await summarizeTweets(batch));
     }
 
-    // 4. Build new feed cards
+    // Build new feed cards
     const newCards = [];
-    for (let i = 0; i < topNewTweets.length; i++) {
-      const tweet = topNewTweets[i];
-      const summary = summaries[i];
-      if (!summary || summary === 'SKIP') continue;
-
-      const author = tweet.author || {};
+    for (let i = 0; i < top.length; i++) {
+      const t = top[i], s = summaries[i];
+      if (!s || s === 'SKIP') continue;
+      const a = t.author || {};
       newCards.push({
-        id: tweet.tweet_id,
-        handle: author.screen_name || '',
-        name: author.name || '',
-        avatar: (author.avatar || '').replace('_normal', '_bigger'),
-        summary: summary,
-        score: tweet._score,
-        likes: tweet.favorites || 0,
-        views: parseInt(tweet.views) || 0,
-        bookmarks: tweet.bookmarks || 0,
-        date: tweet.created_at || '',
+        id: t.tweet_id,
+        handle: a.screen_name || '',
+        name: a.name || '',
+        avatar: (a.avatar || '').replace('_normal', '_bigger'),
+        summary: s,
+        score: t._score,
+        likes: t.favorites || 0,
+        views: parseInt(t.views) || 0,
+        bookmarks: t.bookmarks || 0,
+        date: t.created_at || '',
       });
     }
 
-    // 5. Merge new cards with existing, deduplicate by ID
-    const mergedMap = new Map();
-    for (const card of existingCards) mergedMap.set(card.id, card);
-    for (const card of newCards) mergedMap.set(card.id, card);
-    const mergedFeed = Array.from(mergedMap.values());
-    mergedFeed.sort((a, b) => b.score - a.score || new Date(b.date) - new Date(a.date));
+    // Merge: new cards added, existing preserved. Sort newest first.
+    const map = new Map();
+    for (const c of existing) map.set(c.id, c);
+    for (const c of newCards) map.set(c.id, c);
+    const merged = Array.from(map.values());
+    merged.sort((a, b) => new Date(b.date) - new Date(a.date));
 
-    // 6. Store everywhere
-    await storeFeedCards(mergedFeed);
-    writeCache('feed', mergedFeed);
-    setMemoryCache(mergedFeed);
-    console.log(`Feed built: ${mergedFeed.length} cards (${newCards.length} new, from ${ACCOUNTS.length} accounts)\n`);
-    return mergedFeed;
+    // Persist everywhere
+    await storeFeedCards(merged);
+    cacheSet('feed', merged);
+    lastScanDone = Date.now();
+    setMemoryCache(merged);
+    console.log(`[scan] Feed updated: ${merged.length} total (+${newCards.length} new)\n`);
+
+  } catch (e) {
+    console.error('[scan] Error:', e.message);
   } finally {
-    feedBuildInProgress = false;
+    scanInProgress = false;
+    if (memoryFeedCache) setMemoryCache(memoryFeedCache.cards);
   }
 }
 
-// ── Server ──────────────────────────────────────────────────
+/* ── HTTP server ────────────────────────────────────────── */
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
-
-  // CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
 
-  // Health check for Railway
-  if (url.pathname === '/health' || url.pathname === '/api/health') {
-    res.setHeader('Content-Type', 'application/json');
-    res.writeHead(200);
-    return res.end(JSON.stringify({ status: 'ok', cards: memoryFeedCache ? memoryFeedCache.cards.length : 0 }));
-  }
-
-  if (url.pathname === '/api/feed') {
-    // Fast path: serve from memory cache (sub-millisecond)
-    if (memoryFeedCache) {
-      return sendCachedFeed(req, res);
-    }
-
-    // No cache yet — try DB then file
-    const dbCards = await getFeedCardsFromDb();
-    const fileCards = readCache('feed');
-    const cards = dbCards || fileCards;
-
-    if (cards && cards.length > 0) {
-      setMemoryCache(cards);
-      return sendCachedFeed(req, res);
-    }
-
-    // Nothing anywhere — trigger build (first-time only)
-    try {
-      const feed = await buildFeed();
-      return sendJson(req, res, 200, { cards: feed, cached: false, timestamp: Date.now() });
-    } catch (err) {
-      console.error('Feed error:', err.message);
-      return sendJson(req, res, 500, { error: err.message, cards: [], timestamp: Date.now() });
-    }
-  }
-
-  if (url.pathname === '/api/refresh') {
-    sendJson(req, res, 200, {
-      cards: memoryFeedCache ? memoryFeedCache.cards : [],
-      refreshing: true,
-      timestamp: Date.now(),
+  // Health check
+  if (url.pathname === '/health') {
+    return sendJson(req, res, 200, {
+      status: 'ok',
+      cards: memoryFeedCache?.cards?.length || 0,
+      scanning: scanInProgress,
     });
-    // Rebuild in background — don't block response
-    buildFeed().catch(err => console.error('Background refresh failed:', err.message));
-    return;
   }
 
-  // Serve static files — try memory cache first
-  const reqPath = url.pathname === '/' ? '/' : url.pathname;
-  const cached = staticCache.get(reqPath);
+  // Feed API — READ-ONLY: serves from cache, never triggers a scan
+  if (url.pathname === '/api/feed') {
+    // 1. Memory cache (sub-ms)
+    if (sendCachedFeed(req, res)) return;
+
+    // 2. Try DB
+    const db = await getFeedCardsFromDb();
+    if (db && db.length) {
+      setMemoryCache(db);
+      return sendCachedFeed(req, res);
+    }
+
+    // 3. Try file
+    const file = cacheGet('feed');
+    if (file && file.length) {
+      setMemoryCache(file);
+      return sendCachedFeed(req, res);
+    }
+
+    // 4. Nothing yet — first deploy, scan in progress
+    return sendJson(req, res, 200, {
+      cards: [],
+      timestamp: Date.now(),
+      lastScan: null,
+      scanning: scanInProgress,
+    });
+  }
+
+  // Static files from memory
+  const cached = staticCache.get(url.pathname === '/' ? '/' : url.pathname);
   if (cached) {
-    const acceptGzip = (req.headers['accept-encoding'] || '').includes('gzip');
+    const gz = (req.headers['accept-encoding'] || '').includes('gzip');
     res.setHeader('Content-Type', cached.mime);
-    res.setHeader('Cache-Control', 'public, max-age=300, stale-while-revalidate=600');
-    if (acceptGzip) {
+    res.setHeader('Cache-Control', 'public, max-age=120');
+    if (gz) {
       res.setHeader('Content-Encoding', 'gzip');
       res.writeHead(200);
       return res.end(cached.gzipped);
@@ -758,46 +690,49 @@ const server = http.createServer(async (req, res) => {
   }
 
   // Fallback: read from disk
-  let filePath = url.pathname === '/' ? '/index.html' : url.pathname;
-  filePath = path.join(__dirname, filePath);
-  const ext = path.extname(filePath);
-  const mimeTypes = {
+  let fp = url.pathname === '/' ? '/index.html' : url.pathname;
+  fp = path.join(__dirname, fp);
+  const mimes = {
     '.html': 'text/html; charset=utf-8', '.js': 'application/javascript',
-    '.css': 'text/css', '.json': 'application/json',
-    '.png': 'image/png', '.jpg': 'image/jpeg', '.ico': 'image/x-icon',
-    '.svg': 'image/svg+xml',
+    '.css': 'text/css', '.png': 'image/png', '.jpg': 'image/jpeg',
+    '.ico': 'image/x-icon', '.svg': 'image/svg+xml',
   };
-  fs.readFile(filePath, (err, content) => {
+  fs.readFile(fp, (err, content) => {
     if (err) { res.writeHead(404); return res.end('Not found'); }
-    res.writeHead(200, {
-      'Content-Type': mimeTypes[ext] || 'text/plain',
-      'Cache-Control': 'public, max-age=300',
-    });
+    res.writeHead(200, { 'Content-Type': mimes[path.extname(fp)] || 'text/plain' });
     res.end(content);
   });
 });
 
-// ── Start ───────────────────────────────────────────────────
+/* ── Start ──────────────────────────────────────────────── */
 async function start() {
   await initDb();
   preloadStatic();
 
-  // Warm memory cache from DB/file before accepting traffic
-  const dbCards = await getFeedCardsFromDb();
-  const fileCards = readCache('feed');
-  if (dbCards && dbCards.length > 0) {
-    setMemoryCache(dbCards);
-    console.log(`Memory cache warmed from DB: ${dbCards.length} cards`);
-  } else if (fileCards && fileCards.length > 0) {
-    setMemoryCache(fileCards);
-    console.log(`Memory cache warmed from file: ${fileCards.length} cards`);
+  // Restore scan times from file + DB
+  loadScanTimes();
+  await warmScanTimesFromDb();
+
+  // Warm memory cache from DB or file (instant feed for first visitor)
+  const db = await getFeedCardsFromDb();
+  const file = cacheGet('feed');
+  if (db && db.length) {
+    setMemoryCache(db);
+    console.log(`Cache warmed from DB: ${db.length} cards`);
+  } else if (file && file.length) {
+    setMemoryCache(file);
+    console.log(`Cache warmed from file: ${file.length} cards`);
   }
 
   server.listen(PORT, '0.0.0.0', () => {
-    console.log(`WhileYouWereSleeping.lol running at http://localhost:${PORT}`);
+    console.log(`WhileYouWereSleeping.lol → http://localhost:${PORT}`);
     console.log(`Tracking ${ACCOUNTS.length} accounts\n`);
-    // Build in background — don't delay server start
-    buildFeed().catch(err => console.error('Startup feed build failed:', err.message));
+
+    // Run first scan immediately
+    backgroundScan();
+
+    // Then check for stale accounts every 5 minutes
+    setInterval(backgroundScan, LOOP_INTERVAL);
   });
 }
 
