@@ -433,7 +433,6 @@ function fomoScore(tweet) {
 
   if (/\b(?:SOLD|ACQUIRED|acquisition|exit)\b/i.test(text)) score += 15;
   if (/(?:MRR|ARR)/i.test(text)) score += 5;
-  if (tweet.reply_to) score *= 0.3;
 
   return Math.round(score * 10) / 10;
 }
@@ -452,9 +451,9 @@ async function summarizeTweets(tweetsWithAuthors) {
       messages: [
         {
           role: 'system',
-          content: `You write ultra-short FOMO summaries of AI builders making real money.
+          content: `You extract the most FOMO-inducing snippet from tweets by AI builders making real money.
 
-ONLY summarize tweets that show CONCRETE PROOF of one of these:
+ONLY process tweets that show CONCRETE PROOF of one of these:
 1. Revenue numbers (MRR, ARR, monthly income, profit)
 2. A sale or acquisition with a price
 3. Paying customers / paid user counts
@@ -463,16 +462,18 @@ ONLY summarize tweets that show CONCRETE PROOF of one of these:
 STRICT RULES:
 - Return "SKIP" for anything that is NOT concrete revenue/money proof
 - SKIP: opinions, advice, motivational quotes, product launches without revenue, growth without revenue, general statements
-- SKIP: investments, fundraising, or spending money (we only care about MAKING money or having paying customers)
-- Each summary must be ONE punchy sentence, max 120 chars
-- Start with the achievement: "Made $94K in January" not "Just shared that they made..."
-- Include the actual numbers from the tweet
-- Do NOT include @ handles — shown separately
+- SKIP: investments, fundraising, or spending money (we only care about MAKING money)
+- Extract the EXACT words from the tweet that will cause maximum FOMO — the line that makes readers feel they're falling behind
+- Return VERBATIM text from the tweet — do NOT rewrite, paraphrase, or add words
+- If the tweet is short and already a gut-punch, return the whole thing
+- If long, extract only the most devastating sentence or fragment (the one with the numbers)
+- Strip @mentions and URLs but keep everything else exactly as written
+- Max 200 chars per extract
 - Return a JSON array of strings, one per tweet, same order`
         },
         {
           role: 'user',
-          content: `Summarize ONLY the money/revenue tweets. SKIP everything else:\n\n${prompt}\n\nReturn ONLY a JSON array of strings.`
+          content: `Extract the most FOMO-inducing verbatim snippet from each tweet. SKIP anything without real revenue/money proof:\n\n${prompt}\n\nReturn ONLY a JSON array of strings — exact quotes from the tweets.`
         }
       ],
       temperature: 0.4,
@@ -541,6 +542,8 @@ async function backgroundScan() {
           let found = 0;
 
           for (const tweet of data.timeline) {
+            // Skip replies — only original posts
+            if (tweet.reply_to) continue;
             // Skip tweets already in DB or already in feed — never re-process
             if (known.has(tweet.tweet_id) || existingIds.has(tweet.tweet_id)) continue;
             const score = fomoScore(tweet);
