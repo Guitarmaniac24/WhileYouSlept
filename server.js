@@ -2762,6 +2762,7 @@ function getTrafficDashboardHtml() {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   res.setHeader('Access-Control-Allow-Origin', '*');
+  const ADMIN_SECRET = process.env.ADMIN_SECRET || '';
 
   // Health check
   if (url.pathname === '/health') {
@@ -2873,8 +2874,6 @@ const server = http.createServer(async (req, res) => {
   }
 
   // ── Admin ad slot API ─────────────────────────────────
-  const ADMIN_SECRET = process.env.ADMIN_SECRET || '';
-
   if (url.pathname === '/api/admin/ads' && req.method === 'POST') {
     let body = '';
     req.on('data', function(c) { body += c; });
