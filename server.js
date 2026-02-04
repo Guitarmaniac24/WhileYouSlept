@@ -61,6 +61,11 @@ const pendingAds = new Map(); // handle (lowercase) → { handle, saasName, paid
 const EXPIRED_ADS_FILE = path.join(CACHE_DIR, 'expired_ads.json');
 let expiredAds = [];
 
+// Traffic analytics
+const SESSIONS_FILE = path.join(CACHE_DIR, 'sessions.json');
+let sessions = [];
+const recentIPs = new Map(); // IP → timestamp (rate-limit dedup)
+
 function loadExpiredAds() {
   try {
     if (fs.existsSync(EXPIRED_ADS_FILE)) {
@@ -564,7 +569,7 @@ function pruneCache() {
   try {
     for (const f of fs.readdirSync(CACHE_DIR)) {
       if (!f.endsWith('.json')) continue;
-      if (f === 'trustmrr_data.json' || f === 'scan_times.json' || f === 'ad_slots.json' || f === 'pending_ads.json' || f === 'daily_history.json' || f === 'expired_ads.json') continue;
+      if (f === 'trustmrr_data.json' || f === 'scan_times.json' || f === 'ad_slots.json' || f === 'pending_ads.json' || f === 'daily_history.json' || f === 'expired_ads.json' || f === 'sessions.json') continue;
       const full = path.join(CACHE_DIR, f);
       try {
         if (Date.now() - fs.statSync(full).mtimeMs > 2 * SCAN_COOLDOWN) fs.unlinkSync(full);
@@ -599,6 +604,140 @@ async function warmScanTimesFromDb() {
     }
     console.log(`Scan state loaded for ${r.rows.length} accounts`);
   } catch (e) { /* skip */ }
+}
+
+/* ── Traffic session helpers ────────────────────────────── */
+function loadSessions() {
+  try {
+    if (fs.existsSync(SESSIONS_FILE)) {
+      sessions = JSON.parse(fs.readFileSync(SESSIONS_FILE, 'utf8'));
+      console.log(`Sessions loaded: ${sessions.length}`);
+    }
+  } catch (e) { sessions = []; }
+}
+
+function saveSessions() {
+  try {
+    fs.writeFileSync(SESSIONS_FILE, JSON.stringify(sessions));
+  } catch (e) { console.error('Failed to save sessions:', e.message); }
+}
+
+function cleanupOldSessions() {
+  const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  const before = sessions.length;
+  sessions = sessions.filter(function(s) {
+    return new Date(s.createdAt).getTime() > cutoff;
+  });
+  if (sessions.length !== before) {
+    console.log('[traffic] Cleaned up ' + (before - sessions.length) + ' old sessions');
+    saveSessions();
+  }
+}
+
+function inferSource(referrer) {
+  if (!referrer) return 'direct';
+  try {
+    var host = new URL(referrer).hostname.toLowerCase().replace(/^www\./, '');
+  } catch (e) { return 'direct'; }
+  var map = {
+    'google.com': 'google', 'google.co.uk': 'google', 'google.ca': 'google', 'google.com.au': 'google',
+    'google.de': 'google', 'google.fr': 'google', 'google.es': 'google', 'google.it': 'google',
+    'google.co.jp': 'google', 'google.com.br': 'google', 'google.co.in': 'google',
+    'bing.com': 'bing', 'duckduckgo.com': 'duckduckgo', 'yahoo.com': 'yahoo',
+    'search.yahoo.com': 'yahoo', 'yandex.ru': 'yandex', 'yandex.com': 'yandex',
+    'baidu.com': 'baidu', 'ecosia.org': 'ecosia', 'brave.com': 'brave search',
+    'twitter.com': 'twitter', 'x.com': 'twitter', 't.co': 'twitter',
+    'facebook.com': 'facebook', 'fb.com': 'facebook', 'l.facebook.com': 'facebook',
+    'instagram.com': 'instagram', 'l.instagram.com': 'instagram',
+    'linkedin.com': 'linkedin', 'lnkd.in': 'linkedin',
+    'reddit.com': 'reddit', 'old.reddit.com': 'reddit',
+    'news.ycombinator.com': 'hackernews', 'hn.algolia.com': 'hackernews',
+    'producthunt.com': 'producthunt',
+    'github.com': 'github', 'gist.github.com': 'github',
+    'medium.com': 'medium',
+    'dev.to': 'dev.to', 'hashnode.com': 'hashnode', 'hashnode.dev': 'hashnode',
+    'youtube.com': 'youtube', 'youtu.be': 'youtube',
+    'tiktok.com': 'tiktok',
+    'pinterest.com': 'pinterest',
+    'threads.net': 'threads', 'mastodon.social': 'mastodon',
+    'bsky.app': 'bluesky',
+    'chat.openai.com': 'chatgpt', 'chatgpt.com': 'chatgpt',
+    'claude.ai': 'claude', 'perplexity.ai': 'perplexity',
+    'gemini.google.com': 'gemini',
+    'substack.com': 'substack',
+    'trustmrr.com': 'trustmrr',
+    'slack.com': 'slack', 'discord.com': 'discord', 'discord.gg': 'discord',
+    'notion.so': 'notion', 'notion.site': 'notion',
+    'whatsapp.com': 'whatsapp', 'web.whatsapp.com': 'whatsapp',
+    'telegram.org': 'telegram', 't.me': 'telegram',
+  };
+  if (map[host]) return map[host];
+  // Check partial matches (subdomains)
+  for (var key in map) {
+    if (host.endsWith('.' + key)) return map[key];
+  }
+  return host;
+}
+
+function parseUA(ua) {
+  if (!ua) return { device: 'unknown', browser: 'unknown', os: 'unknown' };
+  // Device
+  var device = 'desktop';
+  if (/tablet|ipad/i.test(ua)) device = 'tablet';
+  else if (/mobile|iphone|android.*mobile|windows phone/i.test(ua)) device = 'mobile';
+  // Browser
+  var browser = 'other';
+  if (/edg\//i.test(ua)) browser = 'edge';
+  else if (/opr\/|opera/i.test(ua)) browser = 'opera';
+  else if (/chrome|crios/i.test(ua)) browser = 'chrome';
+  else if (/firefox|fxios/i.test(ua)) browser = 'firefox';
+  else if (/safari/i.test(ua) && !/chrome/i.test(ua)) browser = 'safari';
+  else if (/msie|trident/i.test(ua)) browser = 'ie';
+  // OS
+  var os = 'other';
+  if (/windows/i.test(ua)) os = 'windows';
+  else if (/macintosh|mac os/i.test(ua)) os = 'macos';
+  else if (/linux/i.test(ua) && !/android/i.test(ua)) os = 'linux';
+  else if (/android/i.test(ua)) os = 'android';
+  else if (/iphone|ipad|ipod/i.test(ua)) os = 'ios';
+  else if (/cros/i.test(ua)) os = 'chromeos';
+  return { device: device, browser: browser, os: os };
+}
+
+function hashIP(ip) {
+  return crypto.createHash('sha256').update(ip || '').digest('hex').slice(0, 16);
+}
+
+function geoLookup(ip) {
+  return new Promise(function(resolve) {
+    if (!ip || ip === '127.0.0.1' || ip === '::1') return resolve({ country: 'Local', city: '' });
+    var timer = setTimeout(function() { resolve({ country: 'Unknown', city: '' }); }, 2000);
+    try {
+      http.get('http://ip-api.com/json/' + encodeURIComponent(ip) + '?fields=country,city', function(resp) {
+        var data = '';
+        resp.on('data', function(c) { data += c; });
+        resp.on('end', function() {
+          clearTimeout(timer);
+          try {
+            var j = JSON.parse(data);
+            resolve({ country: j.country || 'Unknown', city: j.city || '' });
+          } catch (e) { resolve({ country: 'Unknown', city: '' }); }
+        });
+      }).on('error', function() {
+        clearTimeout(timer);
+        resolve({ country: 'Unknown', city: '' });
+      });
+    } catch (e) {
+      clearTimeout(timer);
+      resolve({ country: 'Unknown', city: '' });
+    }
+  });
+}
+
+function getClientIP(req) {
+  var xff = req.headers['x-forwarded-for'];
+  if (xff) return xff.split(',')[0].trim();
+  return (req.socket && req.socket.remoteAddress) || '';
 }
 
 /* ── Response helpers ───────────────────────────────────── */
@@ -1909,6 +2048,106 @@ function getFaqPageHtml() {
 </html>`;
 }
 
+function getDevLoginHtml() {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Login — WhileYouSlept.lol</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #fafafa;
+    color: #000;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .login-box {
+    background: #fff;
+    border: 1px solid #eee;
+    border-radius: 12px;
+    padding: 36px;
+    max-width: 360px;
+    width: 90%;
+    text-align: center;
+  }
+  .login-box h1 {
+    font-family: 'Arial Black', 'Helvetica Neue', Arial, sans-serif;
+    font-size: 1.2rem;
+    font-weight: 900;
+    letter-spacing: -0.5px;
+    margin-bottom: 4px;
+  }
+  .login-box p {
+    font-size: 0.75rem;
+    color: #999;
+    margin-bottom: 20px;
+  }
+  .login-box input {
+    width: 100%;
+    padding: 10px 14px;
+    font-size: 0.85rem;
+    font-family: inherit;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    outline: none;
+    margin-bottom: 12px;
+    transition: border-color 0.15s;
+  }
+  .login-box input:focus { border-color: #000; }
+  .login-box button {
+    width: 100%;
+    padding: 10px 14px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    font-family: inherit;
+    background: #000;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .login-box button:hover { background: #222; }
+  .error-msg {
+    font-size: 0.72rem;
+    color: #dc2626;
+    margin-top: 10px;
+    display: none;
+  }
+</style>
+</head>
+<body>
+<div class="login-box">
+  <h1>Dev Panel</h1>
+  <p>Enter password to continue</p>
+  <form id="loginForm">
+    <input type="password" id="pwd" placeholder="Password" autocomplete="current-password" autofocus>
+    <button type="submit">Log in</button>
+  </form>
+  <div class="error-msg" id="err">Incorrect password</div>
+</div>
+<script>
+document.getElementById('loginForm').addEventListener('submit', function(e) {
+  e.preventDefault();
+  var pwd = document.getElementById('pwd').value.trim();
+  if (!pwd) return;
+  // Redirect with secret param — server will validate
+  window.location.href = '/dev?secret=' + encodeURIComponent(pwd);
+});
+// Show error if we came back from a failed attempt (secret was in URL but wrong)
+if (window.location.search.includes('secret=')) {
+  document.getElementById('err').style.display = 'block';
+}
+</script>
+</body>
+</html>`;
+}
+
 function getDevDashboardHtml() {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -2184,7 +2423,7 @@ function getAdminDashboardHtml() {
 </head>
 <body>
 <h1>Admin Dashboard</h1>
-<p class="subtitle">WhileYouSlept.lol — ad management</p>
+<p class="subtitle">WhileYouSlept.lol — ad management &nbsp;|&nbsp; <a href="/admin/traffic?secret=` + encodeURIComponent(process.env.ADMIN_SECRET || '') + `" style="color:#60a5fa;text-decoration:none;">Traffic Analytics &rarr;</a></p>
 
 <div class="stats-bar" id="statsBar"></div>
 
@@ -2342,6 +2581,175 @@ function getAdminDashboardHtml() {
       .then(function(r) { if (r.ok) { toast('Pending deleted'); load(); } else { toast(r.error || 'Failed', true); } })
       .catch(function() { toast('Network error', true); });
   };
+
+  load();
+})();
+</script>
+</body>
+</html>`;
+}
+
+function getTrafficDashboardHtml() {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Traffic Analytics — WhileYouSlept.lol</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a0a;
+    color: #e0e0e0;
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    font-size: 13px;
+    min-height: 100vh;
+    padding: 24px;
+  }
+  h1 {
+    font-size: 1.3rem;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+    color: #fff;
+    margin-bottom: 4px;
+  }
+  .subtitle { color: #666; font-size: 0.75rem; margin-bottom: 20px; }
+  .subtitle a { color: #60a5fa; text-decoration: none; }
+  .subtitle a:hover { text-decoration: underline; }
+  .period-bar {
+    display: flex; gap: 8px; margin-bottom: 20px;
+  }
+  .period-btn {
+    padding: 4px 12px; font-size: 0.7rem; font-weight: 700;
+    font-family: inherit; border: 1px solid #333; border-radius: 4px;
+    cursor: pointer; background: #1a1a1a; color: #888;
+    transition: all 0.15s;
+  }
+  .period-btn:hover { background: #222; color: #fff; border-color: #555; }
+  .period-btn.active { background: #16a34a; color: #fff; border-color: #16a34a; }
+  .stats-bar {
+    display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 24px;
+  }
+  .stat-box {
+    background: #141414; border: 1px solid #222; border-radius: 8px;
+    padding: 14px 18px; min-width: 110px;
+  }
+  .stat-box .val { font-size: 1.4rem; font-weight: 800; color: #fff; }
+  .stat-box .lbl { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.5px; color: #666; margin-top: 2px; }
+  .section { margin-bottom: 28px; }
+  .section h2 {
+    font-size: 0.75rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.5px; color: #888; margin-bottom: 10px;
+    border-bottom: 1px solid #222; padding-bottom: 6px;
+  }
+  table { width: 100%; border-collapse: collapse; background: #111; border: 1px solid #222; border-radius: 8px; overflow: hidden; }
+  th {
+    text-align: left; padding: 8px 12px; font-size: 0.6rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.5px; color: #555;
+    background: #0d0d0d; border-bottom: 1px solid #222;
+  }
+  td { padding: 8px 12px; font-size: 0.78rem; border-bottom: 1px solid #1a1a1a; vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: #1a1a1a; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .empty { padding: 20px; text-align: center; color: #444; font-style: italic; }
+  @media (max-width: 768px) {
+    body { padding: 12px; }
+    table { font-size: 0.7rem; }
+    .stats-bar { gap: 8px; }
+    .stat-box { padding: 10px 12px; min-width: 80px; }
+    .grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<h1>Traffic Analytics</h1>
+<p class="subtitle">WhileYouSlept.lol — visitor insights &nbsp;|&nbsp; <a href="/admin?secret=` + encodeURIComponent(process.env.ADMIN_SECRET || '') + `">Ad Dashboard &rarr;</a></p>
+
+<div class="period-bar" id="periodBar">
+  <button class="period-btn" data-days="1">1d</button>
+  <button class="period-btn active" data-days="7">7d</button>
+  <button class="period-btn" data-days="14">14d</button>
+  <button class="period-btn" data-days="30">30d</button>
+</div>
+
+<div class="stats-bar" id="statsBar">
+  <div class="stat-box"><div class="val" id="sSessions">-</div><div class="lbl">Sessions</div></div>
+  <div class="stat-box"><div class="val" id="sUnique">-</div><div class="lbl">Unique Visitors</div></div>
+  <div class="stat-box"><div class="val" id="sBounce">-</div><div class="lbl">Bounce Rate</div></div>
+  <div class="stat-box"><div class="val" id="sDuration">-</div><div class="lbl">Avg Duration</div></div>
+</div>
+
+<div class="grid">
+  <div class="section"><h2>By Source</h2><div id="tSource"><div class="empty">Loading...</div></div></div>
+  <div class="section"><h2>By Device</h2><div id="tDevice"><div class="empty">Loading...</div></div></div>
+  <div class="section"><h2>By Country</h2><div id="tCountry"><div class="empty">Loading...</div></div></div>
+  <div class="section"><h2>By Browser</h2><div id="tBrowser"><div class="empty">Loading...</div></div></div>
+</div>
+
+<div class="section"><h2>By Day</h2><div id="tDay"><div class="empty">Loading...</div></div></div>
+<div class="section"><h2>Recent Sessions (last 20)</h2><div id="tRecent"><div class="empty">Loading...</div></div></div>
+
+<script>
+(function() {
+  var secret = new URLSearchParams(window.location.search).get('secret') || '';
+  var currentDays = 7;
+
+  function fmtDur(s) {
+    if (s < 60) return s + 's';
+    var m = Math.floor(s / 60); s = s % 60;
+    return m + 'm ' + s + 's';
+  }
+
+  function makeTable(headers, rows) {
+    if (!rows.length) return '<div class="empty">No data</div>';
+    var h = '<table><tr>' + headers.map(function(x) { return '<th>' + x + '</th>'; }).join('') + '</tr>';
+    h += rows.map(function(r) {
+      return '<tr>' + r.map(function(c) { return '<td>' + c + '</td>'; }).join('') + '</tr>';
+    }).join('');
+    return h + '</table>';
+  }
+
+  function load() {
+    fetch('/api/admin/traffic?secret=' + encodeURIComponent(secret) + '&days=' + currentDays)
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        document.getElementById('sSessions').textContent = d.total;
+        document.getElementById('sUnique').textContent = d.unique;
+        document.getElementById('sBounce').textContent = d.bounceRate + '%';
+        document.getElementById('sDuration').textContent = fmtDur(d.avgDuration);
+
+        document.getElementById('tSource').innerHTML = makeTable(['Source', 'Sessions'],
+          d.bySource.map(function(x) { return [x.name, x.count]; }));
+        document.getElementById('tDevice').innerHTML = makeTable(['Device', 'Sessions'],
+          d.byDevice.map(function(x) { return [x.name, x.count]; }));
+        document.getElementById('tCountry').innerHTML = makeTable(['Country', 'Sessions'],
+          d.byCountry.map(function(x) { return [x.name, x.count]; }));
+        document.getElementById('tBrowser').innerHTML = makeTable(['Browser', 'Sessions'],
+          d.byBrowser.map(function(x) { return [x.name, x.count]; }));
+        document.getElementById('tDay').innerHTML = makeTable(['Date', 'Sessions'],
+          d.byDay.map(function(x) { return [x.date, x.count]; }));
+
+        document.getElementById('tRecent').innerHTML = makeTable(
+          ['Time', 'Source', 'Device', 'Country', 'Duration', 'Scroll', 'Bounce'],
+          d.recent.map(function(s) {
+            var t = new Date(s.createdAt);
+            var time = t.toLocaleDateString() + ' ' + t.toLocaleTimeString();
+            return [time, s.source, s.device, s.country, fmtDur(s.duration), s.scroll_depth + '%', s.bounce ? 'Yes' : 'No'];
+          })
+        );
+      })
+      .catch(function(e) { console.error('Traffic load error:', e); });
+  }
+
+  document.getElementById('periodBar').addEventListener('click', function(e) {
+    if (e.target.classList.contains('period-btn')) {
+      currentDays = parseInt(e.target.dataset.days);
+      document.querySelectorAll('.period-btn').forEach(function(b) { b.classList.remove('active'); });
+      e.target.classList.add('active');
+      load();
+    }
+  });
 
   load();
 })();
@@ -2630,6 +3038,97 @@ const server = http.createServer(async (req, res) => {
     return res.end();
   }
 
+  // ── Traffic tracking: create session ───────────────────────
+  if (url.pathname === '/api/t/session' && req.method === 'POST') {
+    let body = '';
+    req.on('data', function(c) { body += c; if (body.length > 4096) req.destroy(); });
+    req.on('end', async function() {
+      try {
+        var d = JSON.parse(body);
+        var vid = (d.visitor_id || '').slice(0, 64);
+        var sid = (d.session_id || '').slice(0, 64);
+        if (!vid || !sid) return sendJson(req, res, 400, { error: 'Missing visitor_id or session_id' });
+
+        // Rate-limit: 1 session per IP per 5 seconds
+        var clientIP = getClientIP(req);
+        var ipHash = hashIP(clientIP);
+        var now = Date.now();
+        var lastSeen = recentIPs.get(ipHash);
+        if (lastSeen && now - lastSeen < 5000) {
+          return sendJson(req, res, 429, { error: 'Rate limited' });
+        }
+        recentIPs.set(ipHash, now);
+        // Prune old rate-limit entries every 100 inserts
+        if (recentIPs.size > 500) {
+          for (var [k, v] of recentIPs) {
+            if (now - v > 60000) recentIPs.delete(k);
+          }
+        }
+
+        var ua = parseUA(req.headers['user-agent'] || '');
+        var source = d.utm_source || inferSource(d.referrer || req.headers['referer'] || '');
+        var geo = await geoLookup(clientIP);
+
+        var session = {
+          id: sid,
+          visitor_id: vid,
+          ip_hash: ipHash,
+          source: source,
+          medium: (d.utm_medium || '').slice(0, 64) || '',
+          campaign: (d.utm_campaign || '').slice(0, 128) || '',
+          content: (d.utm_content || '').slice(0, 128) || '',
+          term: (d.utm_term || '').slice(0, 128) || '',
+          referrer: (d.referrer || '').slice(0, 512),
+          landing_page: (d.landing_page || '/').slice(0, 256),
+          device: ua.device,
+          browser: ua.browser,
+          os: ua.os,
+          country: geo.country,
+          city: geo.city,
+          duration: 0,
+          scroll_depth: 0,
+          bounce: true,
+          createdAt: new Date().toISOString(),
+        };
+        sessions.push(session);
+        // Cap sessions array at 10000
+        if (sessions.length > 10000) sessions = sessions.slice(-10000);
+        return sendJson(req, res, 200, { ok: true });
+      } catch (e) {
+        return sendJson(req, res, 400, { error: 'Invalid JSON' });
+      }
+    });
+    return;
+  }
+
+  // ── Traffic tracking: update engagement ─────────────────────
+  if (url.pathname === '/api/t/event' && req.method === 'POST') {
+    let body = '';
+    req.on('data', function(c) { body += c; if (body.length > 2048) req.destroy(); });
+    req.on('end', function() {
+      try {
+        var d = JSON.parse(body);
+        var sid = (d.session_id || '').slice(0, 64);
+        if (!sid) return sendJson(req, res, 400, { error: 'Missing session_id' });
+        // Find session and update engagement
+        for (var i = sessions.length - 1; i >= 0; i--) {
+          if (sessions[i].id === sid) {
+            var s = sessions[i];
+            if (typeof d.duration === 'number' && d.duration > s.duration) s.duration = Math.min(d.duration, 86400);
+            if (typeof d.scroll_depth === 'number' && d.scroll_depth > s.scroll_depth) s.scroll_depth = Math.min(d.scroll_depth, 100);
+            // Bounce = duration < 30s AND scroll < 25%
+            s.bounce = s.duration < 30 && s.scroll_depth < 25;
+            break;
+          }
+        }
+        return sendJson(req, res, 200, { ok: true });
+      } catch (e) {
+        return sendJson(req, res, 400, { error: 'Invalid JSON' });
+      }
+    });
+    return;
+  }
+
   // ── Dev ads API (read-only, no auth) ──────────────────────
   if (url.pathname === '/api/dev/ads' && req.method === 'GET') {
     var now = new Date().toISOString();
@@ -2651,6 +3150,66 @@ const server = http.createServer(async (req, res) => {
     return res.end(getFaqPageHtml());
   }
 
+  // ── Traffic analytics API ────────────────────────────────
+  if (url.pathname === '/api/admin/traffic' && req.method === 'GET') {
+    var secret = url.searchParams.get('secret');
+    if (!ADMIN_SECRET || secret !== ADMIN_SECRET) return sendJson(req, res, 401, { error: 'Unauthorized' });
+    var days = Math.min(parseInt(url.searchParams.get('days')) || 7, 90);
+    var cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+    var filtered = sessions.filter(function(s) { return new Date(s.createdAt).getTime() > cutoff; });
+    var uniqueVisitors = new Set(filtered.map(function(s) { return s.visitor_id; })).size;
+    var bounced = filtered.filter(function(s) { return s.bounce; }).length;
+    var bounceRate = filtered.length ? Math.round((bounced / filtered.length) * 100) : 0;
+    var totalDuration = 0;
+    for (var i = 0; i < filtered.length; i++) totalDuration += filtered[i].duration;
+    var avgDuration = filtered.length ? Math.round(totalDuration / filtered.length) : 0;
+
+    // Breakdowns
+    function breakdown(arr, key) {
+      var m = {};
+      for (var i = 0; i < arr.length; i++) {
+        var v = arr[i][key] || 'unknown';
+        m[v] = (m[v] || 0) + 1;
+      }
+      return Object.entries(m).sort(function(a, b) { return b[1] - a[1]; }).map(function(e) { return { name: e[0], count: e[1] }; });
+    }
+
+    // By day
+    var byDay = {};
+    for (var i = 0; i < filtered.length; i++) {
+      var day = filtered[i].createdAt.slice(0, 10);
+      byDay[day] = (byDay[day] || 0) + 1;
+    }
+    var byDayArr = Object.entries(byDay).sort(function(a, b) { return a[0] > b[0] ? -1 : 1; }).map(function(e) { return { date: e[0], count: e[1] }; });
+
+    var recent = filtered.slice(-20).reverse();
+
+    return sendJson(req, res, 200, {
+      days: days,
+      total: filtered.length,
+      unique: uniqueVisitors,
+      bounceRate: bounceRate,
+      avgDuration: avgDuration,
+      bySource: breakdown(filtered, 'source'),
+      byDevice: breakdown(filtered, 'device'),
+      byCountry: breakdown(filtered, 'country'),
+      byBrowser: breakdown(filtered, 'browser'),
+      byDay: byDayArr,
+      recent: recent,
+    });
+  }
+
+  // ── Traffic analytics dashboard ────────────────────────────
+  if (url.pathname === '/admin/traffic') {
+    var secret = url.searchParams.get('secret');
+    if (!ADMIN_SECRET || secret !== ADMIN_SECRET) {
+      res.writeHead(401, { 'Content-Type': 'text/plain' });
+      return res.end('Unauthorized');
+    }
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    return res.end(getTrafficDashboardHtml());
+  }
+
   // ── Admin dashboard ──────────────────────────────────────
   if (url.pathname === '/admin') {
     var secret = url.searchParams.get('secret');
@@ -2664,6 +3223,12 @@ const server = http.createServer(async (req, res) => {
 
   // ── Dev dashboard ─────────────────────────────────────────
   if (url.pathname === '/dev') {
+    var secret = url.searchParams.get('secret');
+    if (!ADMIN_SECRET || secret !== ADMIN_SECRET) {
+      // No secret or wrong secret → show login page
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      return res.end(getDevLoginHtml());
+    }
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     return res.end(getDevDashboardHtml());
   }
@@ -2823,10 +3388,11 @@ async function start() {
   await initDb();
   preloadStatic();
 
-  // Load ad slots + pending ads + expired ads
+  // Load ad slots + pending ads + expired ads + sessions
   loadAdSlots();
   loadPendingAds();
   loadExpiredAds();
+  loadSessions();
 
   // Load TrustMRR data from cache, then sync fresh
   loadTrustMrrData();
@@ -2859,7 +3425,11 @@ async function start() {
     setInterval(function() {
       cleanupExpiredAds();
       cleanupStalePendingAds();
+      cleanupOldSessions();
     }, 5 * 60 * 1000);
+
+    // Persist sessions every 2 minutes
+    setInterval(saveSessions, 2 * 60 * 1000);
   });
 }
 

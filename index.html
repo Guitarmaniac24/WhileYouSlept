@@ -2026,5 +2026,115 @@
 })();
 </script>
 
+<script>
+/* ── Traffic Tracking ─────────────────────────────────────── */
+(function() {
+  'use strict';
+  try {
+    // Visitor ID: persistent across sessions
+    var vid = localStorage.getItem('wys_vid');
+    if (!vid) {
+      vid = 'v_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+      localStorage.setItem('wys_vid', vid);
+    }
+
+    // Session ID: unique per page load
+    var sid = 's_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+
+    // UTM capture
+    var params = new URLSearchParams(window.location.search);
+    var utm = {
+      utm_source: params.get('utm_source') || '',
+      utm_medium: params.get('utm_medium') || '',
+      utm_campaign: params.get('utm_campaign') || '',
+      utm_content: params.get('utm_content') || '',
+      utm_term: params.get('utm_term') || '',
+    };
+
+    // Session creation (non-blocking)
+    var sessionPayload = JSON.stringify({
+      visitor_id: vid,
+      session_id: sid,
+      referrer: document.referrer || '',
+      landing_page: window.location.pathname,
+      utm_source: utm.utm_source,
+      utm_medium: utm.utm_medium,
+      utm_campaign: utm.utm_campaign,
+      utm_content: utm.utm_content,
+      utm_term: utm.utm_term,
+    });
+
+    function sendSession() {
+      try {
+        fetch('/api/t/session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: sessionPayload,
+          keepalive: true,
+        }).catch(function() {});
+      } catch (e) {}
+    }
+
+    if (typeof requestIdleCallback === 'function') {
+      requestIdleCallback(sendSession);
+    } else {
+      setTimeout(sendSession, 100);
+    }
+
+    // Scroll tracking
+    var maxScroll = 0;
+    var scrollTimer = null;
+    function onScroll() {
+      if (scrollTimer) return;
+      scrollTimer = setTimeout(function() {
+        scrollTimer = null;
+        var scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+        var docHeight = Math.max(
+          document.body.scrollHeight, document.documentElement.scrollHeight,
+          document.body.offsetHeight, document.documentElement.offsetHeight
+        ) - window.innerHeight;
+        if (docHeight > 0) {
+          var pct = Math.round((scrollTop / docHeight) * 100);
+          if (pct > maxScroll) maxScroll = Math.min(pct, 100);
+        }
+      }, 200);
+    }
+    window.addEventListener('scroll', onScroll, { passive: true });
+
+    // Engagement tracking
+    var startTime = Date.now();
+
+    function getEngagement() {
+      return JSON.stringify({
+        session_id: sid,
+        duration: Math.round((Date.now() - startTime) / 1000),
+        scroll_depth: maxScroll,
+      });
+    }
+
+    // Periodic engagement updates every 30s
+    var engagementInterval = setInterval(function() {
+      try {
+        navigator.sendBeacon('/api/t/event', new Blob([getEngagement()], { type: 'application/json' }));
+      } catch (e) {}
+    }, 30000);
+
+    // Final engagement on page unload
+    function sendFinal() {
+      try {
+        navigator.sendBeacon('/api/t/event', new Blob([getEngagement()], { type: 'application/json' }));
+      } catch (e) {}
+    }
+
+    window.addEventListener('beforeunload', sendFinal);
+    document.addEventListener('visibilitychange', function() {
+      if (document.visibilityState === 'hidden') sendFinal();
+    });
+  } catch (e) {
+    // Tracking should never break the page
+  }
+})();
+</script>
+
 </body>
 </html>
