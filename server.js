@@ -24,6 +24,17 @@ const LOOP_INTERVAL = 5 * 60 * 1000;         // check for stale tweet scans ever
 
 if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR);
 
+/* ── X / Twitter pixel snippet (public pages) ──────────── */
+const X_PIXEL = `<!-- X conversion tracking base code -->
+<script>
+!function(e,t,n,s,u,a){e.twq||(s=e.twq=function(){s.exe?s.exe.apply(s,arguments):s.queue.push(arguments);
+},s.version='1.1',s.queue=[],u=t.createElement(n),u.async=!0,u.src='https://static.ads-twitter.com/uwt.js',
+a=t.getElementsByTagName(n)[0],a.parentNode.insertBefore(u,a))}(window,document,'script');
+twq('config','r0dkj');
+twq('track','PageView');
+</script>
+<!-- End X conversion tracking base code -->`;
+
 /* ── In-memory state ────────────────────────────────────── */
 let memoryFeedCache = null;      // { json, gzipped }
 let scanInProgress  = false;
@@ -1681,6 +1692,7 @@ function getSuccessPageHtml() {
     display: none;
   }
 </style>
+${X_PIXEL}
 </head>
 <body>
 <div class="container">
@@ -1745,6 +1757,7 @@ function getSuccessPageHtml() {
         document.getElementById('successMsg').style.display = 'block';
         localStorage.removeItem('pendingAdHandle');
         localStorage.removeItem('pendingAdSaas');
+        if (typeof twq === 'function') { twq('event', 'tw-r0dkj-r0dl3'); }
         return;
       }
       if (result.status === 402 && retries > 0) {
@@ -1968,6 +1981,7 @@ function getFaqPageHtml() {
   ]
 }
 </script>
+${X_PIXEL}
 </head>
 <body>
 <div class="page">
