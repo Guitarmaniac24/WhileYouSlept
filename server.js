@@ -3407,29 +3407,20 @@ async function start() {
   loadExpiredAds();
   loadSessions();
 
-  // Load TrustMRR data from cache, then sync fresh
+  // Load TrustMRR data from cache so we can serve immediately
   loadTrustMrrData();
   if (trustmrrStartups.length) setMemoryCache();
 
-  // Sync fresh TrustMRR data
-  await syncTrustMrrData();
-
-  // Enrich default featured ads with live MRR from TrustMRR
-  await enrichDefaultAds();
-
-  // Restore scan times from file + DB
-  loadScanTimes();
-  await warmScanTimesFromDb();
-
+  // Start listening FIRST so Railway sees a healthy port binding
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`WhileYouSlept.lol → http://localhost:${PORT}`);
-    console.log(`Tracking ${trustmrrStartups.length} startups from TrustMRR\n`);
+    console.log(`Tracking ${trustmrrStartups.length} startups from TrustMRR (cached)\n`);
 
-    // Run first tweet scan immediately
-    backgroundScan();
-
-    // Then check for stale tweet scans every 5 minutes
-    setInterval(backgroundScan, LOOP_INTERVAL);
+    // Sync fresh TrustMRR data + enrich ads in the background (non-blocking)
+    syncTrustMrrData()
+      .then(() => enrichDefaultAds())
+      .then(() => console.log('[startup] Background TrustMRR sync + ad enrichment done'))
+      .catch(e => console.error('[startup] Background sync error:', e.message));
 
     // Schedule daily TrustMRR sync at 12:01 AM ET
     scheduleNextSync();
