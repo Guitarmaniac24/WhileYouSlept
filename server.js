@@ -3243,7 +3243,7 @@ const server = http.createServer(async (req, res) => {
       return res.end(getDevLoginHtml());
     }
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-    return res.end(getDevDashboardHtml());
+    return res.end(getAdminDashboardHtml());
   }
 
   // ── Admin dashboard API ─────────────────────────────────
