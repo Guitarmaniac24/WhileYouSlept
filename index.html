@@ -715,7 +715,7 @@
 
   /* ── Featured Section (top of feed) ────────────────────────── */
   .featured-section {
-    display: grid;
+    display: none; /* DISABLED: re-enable after local testing */
     grid-template-columns: repeat(3, 1fr);
     gap: 18px;
     margin-bottom: 24px;
@@ -1354,7 +1354,7 @@ twq('track','PageView');
     <h2>The window is closing.</h2>
     <p>Every day you wait, someone else ships what you were "going to build."</p>
     <div class="count" id="count"></div>
-    <div class="footer-advertise">
+    <div class="footer-advertise" style="display:none;"><!-- DISABLED: re-enable after local testing -->
       <a href="#" id="advertiseFooterLink">Advertise your SaaS here &mdash; $49/week</a>
     </div>
     <div class="footer-links">
